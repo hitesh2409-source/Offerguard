@@ -367,7 +367,8 @@ EXAMPLES = [
 CSS = """
 <style>
 footer, [data-testid="stToolbar"] {visibility: hidden;}
-.block-container {max-width: 780px; padding-top: 2rem;}
+[data-testid="stHeader"] {background: transparent;}
+.block-container, [data-testid="stMainBlockContainer"] {max-width: 780px; padding-top: 4.5rem !important;}
 [data-testid="stAppViewContainer"] {
   background-image: radial-gradient(520px 320px at 92% 0, rgba(255,143,171,.25), transparent),
                     radial-gradient(520px 360px at 0 8%, rgba(142,197,255,.28), transparent);}
@@ -384,7 +385,10 @@ footer, [data-testid="stToolbar"] {visibility: hidden;}
 .og-bar {height: 5px; border-radius: 5px; margin-top: 6px; opacity: .85;}
 mark {background: #ffe58a; color: #2b2540; border-radius: 5px; padding: 0 3px;}
 @keyframes og-fill {from {stroke-dashoffset: 141.4;}}
-div.stButton > button, div.stDownloadButton > button {width: 100%; border-radius: 999px; font-weight: 700;}
+div[data-testid="stElementContainer"]:has(button), div[data-testid="stElementContainer"]:has(a[data-testid^="stBaseLinkButton"]) {width: 100% !important;}
+div.stButton, div.stDownloadButton, div[data-testid="stButton"], div[data-testid="stDownloadButton"] {width: 100% !important;}
+div.stButton > button, div.stDownloadButton > button, div[data-testid="stButton"] > button, div[data-testid="stDownloadButton"] > button {width: 100%; border-radius: 999px; font-weight: 700;}
+button[data-testid="stBaseButton-primary"] {background-color: #6c4cf1 !important; border-color: #6c4cf1 !important; color: #fff !important;}
 a[data-testid^="stBaseLinkButton"] {width: 100%; justify-content: center; border-radius: 999px; font-weight: 700;}
 </style>
 """
