@@ -1,4 +1,5 @@
 import html
+import random
 import re
 from datetime import datetime, timezone
 from urllib.parse import quote_plus
@@ -353,15 +354,164 @@ FIELDS = {
     "Data": "data analyst intern",
     "Finance": "finance intern",
 }
-EXAMPLES = [
-    "Congratulations! You are selected for our Data Entry internship. Pay a registration fee of "
-    "Rs 500 immediately to confirm your seat. Limited seats, last chance. Contact us on WhatsApp.",
-    "Please confirm your acceptance and availability for the proposed joining date.\n\n"
-    "We look forward to your response and wish you success in your professional journey.\n\n"
-    "Regards,\nHuman Resources Department\nTechNova Innovations",
-    "Dear Candidate, we are pleased to offer you a 2 month internship as a Python developer at our "
-    "Gurugram office. The stipend is Rs 10000 per month. Please reply to hr@technova.com with your "
-    "joining date. More about us: https://technova.com/careers",
+# Three buttons, 10 made-up samples each: fee scams, fake HR emails, genuine offers.
+EXAMPLE_POOLS = [
+ [
+  {
+   "m": "Dear Student, you are selected for a 2 month Content Writing internship (work from home, stipend Rs 5000). A registration fee of Rs 500 is required to confirm your seat. Write to hr@writeworks.in for payment details.",
+   "s": "",
+   "c": ""
+  },
+  {
+   "m": "Congratulations! You are selected for our Data Entry internship. Pay a registration fee of Rs 500 to confirm your seat. Contact us on WhatsApp.",
+   "s": "",
+   "c": ""
+  },
+  {
+   "m": "Dear Candidate, your application for the Online Survey internship is approved. Pay Rs 299 as processing fee today only and start earning. Stipend Rs 6000, remote, 1 month. Email: join@surveyhub.in",
+   "s": "",
+   "c": ""
+  },
+  {
+   "m": "Part time typing internship, 2 months. Pay a training fee of Rs 800 to begin. Message us on Telegram.",
+   "s": "",
+   "c": ""
+  },
+  {
+   "m": "Government approved internship! Pay Rs 1200 as security deposit and receive your offer letter. Last chance, seats are filling fast.",
+   "s": "",
+   "c": ""
+  },
+  {
+   "m": "Final reminder: your internship seat will be cancelled if the registration fee of Rs 350 is not paid immediately. Reply to this number with the screenshot.",
+   "s": "",
+   "c": ""
+  },
+  {
+   "m": "Shortlisted for Social Media Intern at a reputed firm. No interview required. Pay Rs 999 registration fee to lock your seat. Duration 3 months, stipend Rs 7000, work from home. Contact: jobs@reputedfirm.co",
+   "s": "",
+   "c": ""
+  },
+  {
+   "m": "Congratulations, you are directly selected for a 100% placement guaranteed course plus internship. Pay the processing fee of Rs 4999. Share your PAN card on Telegram.",
+   "s": "",
+   "c": ""
+  },
+  {
+   "m": "Work from home product review job for students. Immediately pay the kit fee of Rs 700 to get your login ID. Duration 1 month.",
+   "s": "",
+   "c": ""
+  },
+  {
+   "m": "Dear Candidate, a refundable security deposit of Rs 2000 is needed before we issue your joining letter for the 3 month Python internship (stipend Rs 8000, hybrid). Pay via the link: https://pay.joinletter.xyz/secure",
+   "s": "",
+   "c": ""
+  }
+ ],
+ [
+  {
+   "m": "Dear Candidate, we are pleased to offer you a 3 month Marketing internship at Lumora Analytics, starting 1 December. Stipend: Rs 12000 per month, hybrid. Please reply from this email only and keep the offer confidential.",
+   "s": "hr.lumoraanalytics@gmail.com",
+   "c": "Lumora Analytics"
+  },
+  {
+   "m": "Hello, your profile fits a 4 month Data Analyst internship at Vertexa Labs, remote, stipend Rs 20000 per month. Confirm immediately as only a few seats are left.",
+   "s": "vertexa.recruitment@yahoo.in",
+   "c": "Vertexa Labs"
+  },
+  {
+   "m": "Hi, HR here from Novaspark Media. We offer a 2 month Video Editing internship, office based, stipend Rs 9000. Continue the process on WhatsApp to receive your joining kit.",
+   "s": "novaspark.hr@hotmail.com",
+   "c": "Novaspark Media"
+  },
+  {
+   "m": "Greetings from Quantleaf Systems. We are offering a 6 month Software Engineer trainee role, Rs 25000 per month, office based. To generate your employee ID, please share a scan of your Aadhaar by email.",
+   "s": "quantleaf.careers@outlook.com",
+   "c": "Quantleaf Systems"
+  },
+  {
+   "m": "Dear Candidate, your resume fits our 3 month Business Analyst internship at Brightwave Consulting. Stipend Rs 15000 per month, work from home. A refundable security deposit of Rs 2000 is needed before the first session.",
+   "s": "brightwave.hiring@gmail.com",
+   "c": "Brightwave Consulting"
+  },
+  {
+   "m": "Dear Student, congratulations! You are selected for a 2 month Graphic Design internship at PixelNest Studio, stipend Rs 8000, work from home. No interview needed. Please confirm within 24 hours.",
+   "s": "pixelnest.hr@outlook.com",
+   "c": "PixelNest Studio"
+  },
+  {
+   "m": "Hello, Vertexa Labs is hiring a 3 month Web Developer intern, remote, stipend Rs 20000 per month. Pay a processing fee of Rs 750 immediately to activate your company email.",
+   "s": "vertexa.hr@yahoo.in",
+   "c": "Vertexa Labs"
+  },
+  {
+   "m": "Dear Applicant, Kairo Fintech is hiring a Finance intern for 2 months, Rs 12000 stipend, remote. Please send your bank account details on Telegram to activate your payroll account.",
+   "s": "kairo.fintech.hr@rediffmail.com",
+   "c": "Kairo Fintech"
+  },
+  {
+   "m": "Dear Applicant, we offer a 1 month Marketing internship at Mintora Foods, stipend Rs 7000, office based. A security deposit of Rs 1500 is needed for your uniform and ID card. Kindly pay and share your password to access the training portal.",
+   "s": "mintora.foods.hr@yahoo.com",
+   "c": "Mintora Foods"
+  },
+  {
+   "m": "Dear Candidate, we offer you a 3 month Operations internship at Skyforge Logistics, office based, stipend Rs 14000. Kindly pay a registration fee of Rs 600 to confirm your seat.",
+   "s": "careers@jobs-hiring-portal.net",
+   "c": "Skyforge Logistics"
+  }
+ ],
+ [
+  {
+   "m": "Dear Ishaan, thank you for attending the interview on Friday. We are glad to offer you a 2 month Robotics Engineering internship at Greenfield Robotics, starting 10 January. The stipend is Rs 15000 per month and the work is on site at our Pune office. Please reply to confirm your acceptance. Contact: talent@greenfieldrobotics.in",
+   "s": "talent@greenfieldrobotics.in",
+   "c": "Greenfield Robotics"
+  },
+  {
+   "m": "Hello Sneha, congratulations on clearing both interview rounds. Sunrise Learning would like to offer you a 3 month UX Design internship, starting 15 December. This is a remote role with a stipend of Rs 10000 per month. The offer letter and joining instructions are attached to this email. Write to interns@sunriselearning.com with any questions.",
+   "s": "interns@sunriselearning.com",
+   "c": "Sunrise Learning"
+  },
+  {
+   "m": "Dear Rohan, we are pleased to offer you a 6 month Operations internship at UrbanLoop Mobility, hybrid, with a monthly stipend of Rs 14000. Your reporting manager will be Kavita Nair. A WhatsApp group will be created for day to day coordination. Please sign and return the offer letter by 20 November. More details at https://urbanloop.in/careers",
+   "s": "careers@urbanloop.in",
+   "c": "UrbanLoop Mobility"
+  },
+  {
+   "m": "Hi Tanya, Maple Design Studio is happy to invite you for an 8 week Graphic Design internship, office based in Gurugram. Please send your portfolio link to jobs@mapledesign.in before your start date of 3 February. We look forward to working with you.",
+   "s": "jobs@mapledesign.in",
+   "c": "Maple Design Studio"
+  },
+  {
+   "m": "Dear Kabir, following your interview with the engineering team, Orchid Software is pleased to offer you a 4 month Software Developer internship. The stipend is Rs 22000 per month and the work location is our Noida office. Kindly confirm your acceptance by email. Regards, Meenal Rao, careers@orchidsoftware.com",
+   "s": "careers@orchidsoftware.com",
+   "c": "Orchid Software"
+  },
+  {
+   "m": "Dear Ananya, Riverbend Foundation invites you to join as a Research intern for 10 weeks, unpaid but with a certificate and travel allowance, in a remote role. Please read the attached guidelines and reply to volunteers@riverbend.org by 25 November.",
+   "s": "volunteers@riverbend.org",
+   "c": "Riverbend Foundation"
+  },
+  {
+   "m": "Hi Dev, thanks for your time during the interview. Coral Cloud Services is delighted to offer you a 3 month Cloud Support internship, remote, stipend Rs 16000 per month, starting 2 February. Your onboarding guide is at https://coralcloud.io/welcome. For questions, write to hr@coralcloud.io.",
+   "s": "hr@coralcloud.io",
+   "c": "Coral Cloud Services"
+  },
+  {
+   "m": "Hi Neel, welcome aboard! Harbor Retail is offering you a 6 week Sales internship, office based, with a stipend of Rs 7000. Join our Telegram channel for team updates. Write to people@harborretail.in if you have questions.",
+   "s": "people@harborretail.in",
+   "c": "Harbor Retail"
+  },
+  {
+   "m": "Dear Pooja, Redwood Health is offering you a Research Assistant internship starting 1 February, hybrid, with a stipend of Rs 9000 per month. Please reply to this email to accept. Contact: hr@redwoodhealth.in",
+   "s": "hr@redwoodhealth.in",
+   "c": "Redwood Health"
+  },
+  {
+   "m": "Dear Karan, we are delighted to offer you a 3 month Finance internship at Quill and Co Advisors, remote. Please confirm your acceptance by replying to finance@quillco.in",
+   "s": "finance@quillco.in",
+   "c": "Quill and Co Advisors"
+  }
+ ]
 ]
 
 CSS = """
@@ -443,7 +593,7 @@ def guess_field(message):
         return "Design"
     if re.search(r"market|social media|content", t):
         return "Marketing"
-    if re.search(r"data|analyst", t):
+    if re.search(r"data analy|data scien|analyst", t):
         return "Data"
     if re.search(r"financ|account", t):
         return "Finance"
@@ -538,10 +688,19 @@ for key, default in [("msg", ""), ("sender", ""), ("company", ""), ("result", No
         st.session_state[key] = default
 
 
+if "example_idx" not in st.session_state:
+    st.session_state.example_idx = [random.randrange(len(p)) for p in EXAMPLE_POOLS]
+
+
 def load_example(i):
-    st.session_state.msg = EXAMPLES[i]
-    st.session_state.sender = ""
-    st.session_state.company = "TechNova Innovations" if i == 2 else ""
+    """Each click on a button loads the NEXT sample from that button's list."""
+    pool = EXAMPLE_POOLS[i]
+    n = st.session_state.example_idx[i] % len(pool)
+    st.session_state.example_idx[i] = (n + 1) % len(pool)
+    ex = pool[n]
+    st.session_state.msg = ex["m"]
+    st.session_state.sender = ex["s"]
+    st.session_state.company = ex["c"]
     st.session_state.go = True
 
 
@@ -569,7 +728,7 @@ st.markdown('<p class="og-title">🛡️ Offer<span>Guard</span></p>'
 st.caption("Try an example")
 ex1, ex2, ex3 = st.columns(3)
 ex1.button("🚩 Fee scam", on_click=load_example, args=(0,))
-ex2.button("🤔 Polite but vague", on_click=load_example, args=(1,))
+ex2.button("🕵️ Fake HR email", on_click=load_example, args=(1,))
 ex3.button("✅ Genuine offer", on_click=load_example, args=(2,))
 
 with st.container(border=True):
