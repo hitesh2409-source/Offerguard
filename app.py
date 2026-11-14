@@ -1150,8 +1150,54 @@ EXAMPLE_POOLS = [
    "s": "",
    "c": "Brightfield Labs"
   }
+ ],
+ [
+  {
+   "m": "Congratulations! You are selected for a 2 month Content Writing internship at BrightPath Media, work from home, stipend Rs 8000. Confirm your seat here: https://bit.ly/3xBrightPath",
+   "s": "",
+   "c": "BrightPath Media",
+   "t": "\ud83d\udd17 Shortened link",
+   "n": "Shortened links hide where they really lead. OfferGuard flags the link (+20) and never opens it. Look at the highlighted link in the 'Your message' tab."
+  },
+  {
+   "m": "Dear Candidate, we are pleased to offer you a 3 month Web Development internship at Nexora Tech, remote, stipend Rs 15000 per month. Please send your resume to this address and confirm within 24 hours.",
+   "s": "nexora.hr.team@gmail.com",
+   "c": "Nexora Tech",
+   "t": "\u2709\ufe0f Personal email",
+   "n": "A real company emails from its own domain. This sender uses Gmail while claiming to be a company, so the Sender check flags it (+10) and the urgency adds more."
+  },
+  {
+   "m": "Dear Candidate, congratulations on being shortlisted for the Infosys Springboard internship: 3 months, remote, stipend Rs 12000 per month, starting 5 January. Please reply to this email to accept.",
+   "s": "careers@infosys-hiring.in",
+   "c": "Infosys",
+   "t": "\u2709\ufe0f Lookalike domain",
+   "n": "The score alone looks low, because the email contains the company name. Press 'Continue to Cross-check': OfferGuard finds the real official website and warns that this domain imitates it."
+  },
+  {
+   "m": "Dear Candidate, Vertexa Labs offers you a 4 month Data Analyst internship, remote, stipend Rs 20000 per month, starting 1 February. Please reply to this email to accept.",
+   "s": "careers@vertexa-labs.invalid",
+   "c": "Vertexa Labs",
+   "t": "\ud83c\udf10 Domain does not exist",
+   "n": "With live checks on, OfferGuard asks the internet if the sender's domain exists. The .invalid ending can never exist, so this demo always shows 'Domain does not exist' (+30)."
+  },
+  {
+   "m": "Dear Ananya, thank you for your interview. Mozilla Foundation is pleased to offer you a 3 month Research internship, remote, stipend Rs 20000 per month, starting 1 February. Please reply to this email to accept.",
+   "s": "interns@mozilla.org",
+   "c": "Mozilla Foundation",
+   "t": "\ud83c\udf10 Established domain",
+   "n": "The good-sign case (sample text). With live checks on, the Cross-check page shows an old domain with working email, SPF and DMARC. A low score still does not prove an offer is genuine."
+  },
+  {
+   "m": "URGENT! Dear Candidate, you are directly selected for a Data Entry internship at Vertexa Labs, work from home, earn per day. No interview. Pay the Rs 750 registration fee immediately here: https://tinyurl.com/vertexa-pay and share your Aadhaar on WhatsApp.",
+   "s": "vertexa.hr@yahoo.in",
+   "c": "Vertexa Labs",
+   "t": "\ud83d\udca5 Everything at once",
+   "n": "The full picture: money, sensitive details, pressure, no interview, chat-app contact, a personal email and a payment link behind a shortener. Score 100."
+  }
  ]
 ]
+
+
 CSS = """
 <style>
 footer, [data-testid="stToolbar"] {visibility: hidden;}
@@ -2028,17 +2074,20 @@ def load_example(i):
     st.session_state.example_idx[i] = (n + 1) % len(pool)
     ex = pool[n]
     set_inputs(ex["m"], ex["s"], ex["c"])
+    st.session_state.demo_note = (f"Demo {n + 1} of {len(pool)} · {ex['t']}: {ex['n']}") if ex.get("n") else ""
     st.session_state.go = True
 
 
 def load_history(i):
     item = st.session_state.history[i]
     set_inputs(item["msg"], item["sender"], item["company"])
+    st.session_state.demo_note = ""
     st.session_state.go = True
 
 
 def clear_all():
     set_inputs("", "", "")
+    st.session_state.demo_note = ""
     st.session_state.result = None
 
 
@@ -2060,12 +2109,19 @@ def page_check():
             st.session_state["w_" + k] = st.session_state[k]
 
     st.caption("Try an example")
-    ex1, ex2, ex3, ex4 = st.columns(4)
+    ex1, ex2, ex3 = st.columns(3)
     ex1.button("🚩 Fee scam", on_click=load_example, args=(0,))
     ex2.button("🕵️ Fake HR email", on_click=load_example, args=(1,))
     ex3.button("✅ Genuine offer", on_click=load_example, args=(2,))
-    ex4.button("🔗 Short link", on_click=load_example, args=(3,), key="ex_short",
-               help="Offers hiding the real website behind a shortened link")
+
+    t1, t2 = st.columns(2)
+    t1.button("🎯 Key features tour", on_click=load_example, args=(4,), key="ex_tour",
+              help="Six examples, each showing one feature: short links, email checks, domain checks")
+    t2.button("🔗 Short link", on_click=load_example, args=(3,), key="ex_short",
+              help="Offers hiding the real website behind a shortened link")
+    if st.session_state.get("demo_note"):
+        st.markdown(f'<div class="og-card" style="border-left:6px solid #6c4cf1;padding:10px 14px">'
+                    f'<b>🎯 {html.escape(st.session_state.demo_note)}</b></div>', unsafe_allow_html=True)
 
     with st.container(border=True):
         st.text_area("Offer message", key="w_msg", height=170,
