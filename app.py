@@ -1118,9 +1118,40 @@ EXAMPLE_POOLS = [
    "s": "finance@quillco.in",
    "c": "Quill and Co Advisors"
   }
+ ],
+ [
+  {
+   "m": "Congratulations! You are selected for a 2 month Digital Marketing internship at BrightPath Media, stipend Rs 8000, work from home. Seats are limited, so confirm today only and pay the Rs 499 registration fee here: https://bit.ly/3xBrightPath",
+   "s": "",
+   "c": "BrightPath Media"
+  },
+  {
+   "m": "Dear Candidate, this is Priya from HR at Nexora Tech. Your profile is shortlisted for a 3 month Web Development internship, remote, stipend Rs 15000 per month. Fill the joining form within 24 hours: https://tinyurl.com/nexora-join-form",
+   "s": "nexora.hr.team@gmail.com",
+   "c": "Nexora Tech"
+  },
+  {
+   "m": "Hello, you are directly selected for a 1 month Data Entry internship with Orbit Services, work from home, Rs 6000. Upload your Aadhaar and PAN card on the verification page: https://cutt.ly/orbit-verify . Contact us on WhatsApp for help.",
+   "s": "",
+   "c": "Orbit Services"
+  },
+  {
+   "m": "Dear Student, your Python internship offer letter at CodeCrest Solutions is ready: 2 months, remote, stipend Rs 10000. Pay the Rs 1500 security deposit through this UPI link to download it: https://rb.gy/codecrest-pay . Hurry, last chance.",
+   "s": "codecrest.offers@yahoo.in",
+   "c": "CodeCrest Solutions"
+  },
+  {
+   "m": "Dear Candidate, congratulations on being shortlisted for the Infosys Springboard internship (3 months, remote, stipend Rs 12000). Complete your registration within 24 hours using this link: https://t.ly/infy-register",
+   "s": "careers@infosys-hiring.in",
+   "c": "Infosys"
+  },
+  {
+   "m": "Dear Meera, thank you for your interview on Monday. We are pleased to offer you a 3 month Research internship at Brightfield Labs, hybrid, stipend Rs 12000 per month, starting 5 January. Your onboarding guide is here: https://bit.ly/bf-onboard . Please reply to this message to accept.",
+   "s": "",
+   "c": "Brightfield Labs"
+  }
  ]
 ]
-
 CSS = """
 <style>
 footer, [data-testid="stToolbar"] {visibility: hidden;}
@@ -1969,7 +2000,7 @@ if st.session_state.dark:
     st.markdown(DARK_CSS, unsafe_allow_html=True)
 
 if "example_idx" not in st.session_state:
-    st.session_state.example_idx = [random.randrange(len(p)) for p in EXAMPLE_POOLS]
+    st.session_state.example_idx = [random.randrange(len(p)) if i < 3 else 0 for i, p in enumerate(EXAMPLE_POOLS)]
 
 
 def sync():
@@ -2029,10 +2060,12 @@ def page_check():
             st.session_state["w_" + k] = st.session_state[k]
 
     st.caption("Try an example")
-    ex1, ex2, ex3 = st.columns(3)
+    ex1, ex2, ex3, ex4 = st.columns(4)
     ex1.button("🚩 Fee scam", on_click=load_example, args=(0,))
     ex2.button("🕵️ Fake HR email", on_click=load_example, args=(1,))
     ex3.button("✅ Genuine offer", on_click=load_example, args=(2,))
+    ex4.button("🔗 Short link", on_click=load_example, args=(3,), key="ex_short",
+               help="Offers hiding the real website behind a shortened link")
 
     with st.container(border=True):
         st.text_area("Offer message", key="w_msg", height=170,
