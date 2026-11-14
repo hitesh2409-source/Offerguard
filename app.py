@@ -2,7 +2,7 @@ import html
 import random
 import re
 from datetime import datetime, timezone
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlparse
 
 import requests
 import streamlit as st
@@ -230,20 +230,20 @@ def lookup_mail_dns(domain):
         return "unknown"
 
 
-def check_domain(domain):
+def check_domain(domain, group="Sender check", label=""):
     """Live checks on the sender's domain. Returns a list of findings."""
     results = []
 
     dns = lookup_mail_dns(domain)
     if dns == "no_domain":
         results.append({
-            "group": "Sender check", "name": "Domain does not exist", "points": 30,
+            "group": group, "name": label + "Domain does not exist", "points": 30,
             "reason": "The sender's domain has no DNS records at all, so it is probably fake.",
             "found": [domain],
         })
     elif dns == "no_mail":
         results.append({
-            "group": "Sender check", "name": "Domain cannot receive email", "points": 15,
+            "group": group, "name": label + "Domain cannot receive email", "points": 15,
             "reason": "The domain exists but has no mail records, which is unusual for a real company.",
             "found": [domain],
         })
@@ -251,37 +251,138 @@ def check_domain(domain):
     age = lookup_domain_age(root_domain(domain))
     if age is None:
         results.append({
-            "group": "Sender check", "name": "Domain age could not be checked", "points": 0,
+            "group": group, "name": "Domain age could not be checked", "points": 0,
             "reason": "The registry did not return a registration date. This is common for some "
                       "domain endings, so it does not count against the offer.",
             "found": [domain],
         })
     elif age < 30:
         results.append({
-            "group": "Sender check", "name": f"Domain is only {age} days old", "points": 35,
+            "group": group, "name": label + f"Domain is only {age} days old", "points": 35,
             "reason": "Scam websites are often created days before they are used. Real companies "
                       "usually have older domains.",
             "found": [domain],
         })
     elif age < 90:
         results.append({
-            "group": "Sender check", "name": f"Domain is only {age} days old", "points": 20,
+            "group": group, "name": label + f"Domain is only {age} days old", "points": 20,
             "reason": "The domain was registered recently. Check that the company really exists.",
             "found": [domain],
         })
     elif age < 180:
         results.append({
-            "group": "Sender check", "name": f"Domain is {age} days old", "points": 10,
+            "group": group, "name": label + f"Domain is {age} days old", "points": 10,
             "reason": "The domain is fairly new. Not a problem by itself, but verify the company.",
             "found": [domain],
         })
     else:
         results.append({
-            "group": "Sender check", "name": f"Domain is about {age // 365} year(s) old"
+            "group": group, "name": f"Domain is about {age // 365} year(s) old"
             if age >= 365 else f"Domain is {age} days old", "points": 0,
             "reason": "An older domain is a good sign, but scammers can also hijack or buy old domains.",
             "found": [domain],
         })
+    return results
+
+
+# ============================================================
+# LINK SCANNING: checks the links found inside the message
+# ============================================================
+URL_SHORTENERS = ["bit.ly", "tinyurl.com", "t.co", "goo.gl", "cutt.ly", "rb.gy", "is.gd",
+                  "shorturl.at", "ow.ly", "tiny.cc", "rebrand.ly", "t.ly", "buff.ly"]
+SUSPICIOUS_TLDS = (".xyz", ".top", ".click", ".icu", ".buzz", ".cfd", ".sbs", ".monster",
+                   ".rest", ".tk", ".gq", ".ml", ".cf")
+TRUSTED_LINK_DOMAINS = ["linkedin.com", "internshala.com", "unstop.com", "naukri.com", "google.com",
+                        "forms.gle", "zoom.us", "microsoft.com", "github.com", "youtube.com"]
+TRUSTED_LINK_SUFFIXES = (".gov.in", ".nic.in", ".ac.in", ".edu")
+PAYMENT_WORDS = ["pay", "payment", "upi", "checkout", "deposit", "fee", "fees"]
+LINK_POINTS_CAP = 50  # links can add at most this many points in total
+URL_PATTERN = (r"(?:https?://|www\.)[^\s<>\"')\]]+|\b(?:"
+               + "|".join(re.escape(d) for d in URL_SHORTENERS) + r")/[^\s<>\"')\]]*")
+
+
+def extract_links(message):
+    """Find links in the message. Returns the links as written (max 5, no repeats)."""
+    links = []
+    for raw in re.findall(URL_PATTERN, message, flags=re.IGNORECASE):
+        raw = raw.rstrip(".,;:!?")
+        if raw and raw not in links:
+            links.append(raw)
+    return links[:5]
+
+
+def link_host(raw):
+    """Return (host name, parsed link) for a link, or ("", None) if it cannot be read."""
+    try:
+        parsed = urlparse(raw if "://" in raw else "http://" + raw)
+        return (parsed.hostname or "").lower(), parsed
+    except ValueError:
+        return "", None
+
+
+def is_trusted_link(host):
+    return root_domain(host) in TRUSTED_LINK_DOMAINS or host.endswith(TRUSTED_LINK_SUFFIXES)
+
+
+def check_links(message, skip_domain="", live=True):
+    """Look at every link in the message. Returns a list of findings (group 'Link check')."""
+    results = []
+    total = 0
+    seen = set()
+    live_checked = 0
+    skip_root = root_domain(skip_domain) if skip_domain else ""
+
+    def add(host, name, points, reason):
+        nonlocal total
+        points = min(points, LINK_POINTS_CAP - total)
+        if points <= 0:
+            return
+        total += points
+        results.append({"group": "Link check", "name": name, "points": points,
+                        "reason": reason, "found": [host]})
+
+    for raw in extract_links(message):
+        host, parsed = link_host(raw)
+        if not host or "." not in host or host in seen:
+            continue
+        seen.add(host)
+        if is_trusted_link(host):
+            continue
+
+        is_short = host in URL_SHORTENERS
+        is_ip = re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", host) is not None
+
+        if is_short:
+            add(host, "Shortened link", 20,
+                "Shortened links hide where they really go. Scammers use them to disguise payment or form pages.")
+        if is_ip:
+            add(host, "Link uses a raw IP address", 25,
+                "A link that uses numbers instead of a website name is a common sign of a throwaway or fake site.")
+        if parsed is not None and parsed.username is not None:
+            add(host, "Link hides its real address with @", 25,
+                "A link containing an @ sign can hide the real website name before it.")
+        if host.endswith(SUSPICIOUS_TLDS):
+            add(host, "Unusual domain ending", 10,
+                "This ending is often used for cheap throwaway websites. It is not proof of a scam, so check the company.")
+        if host.count("-") >= 3:
+            add(host, "Address has many hyphens", 10,
+                "Many hyphens in a web address often point to a lookalike or throwaway site.")
+        if raw.lower().startswith("http://"):
+            add(host, "Link is not encrypted (http)", 5,
+                "Real companies rarely use unencrypted links for forms or payments.")
+        words = re.split(r"[^a-z0-9]+", (host + " " + (parsed.path if parsed else "")).lower())
+        if any(w in PAYMENT_WORDS for w in words):
+            add(host, "Link looks like a payment page", 15,
+                "Real internships never ask you to pay to be selected.")
+
+        # Live check: how old is the linked website, and does it exist?
+        if live and live_checked < 3 and not is_short and not is_ip:
+            root = root_domain(host)
+            if root != skip_root:
+                live_checked += 1
+                for f in check_domain(root, group="Link check", label="Link: "):
+                    if f["points"] > 0:
+                        add(host, f["name"], f["points"], f["reason"])
     return results
 
 
@@ -320,6 +421,9 @@ def check_message(message, sender="", company="", live=True):
     if live and domain and domain not in FREE_EMAIL_DOMAINS:
         matches += check_domain(domain)
 
+    # 5) Links inside the message
+    matches += check_links(message, domain or "", live)
+
     for m in matches:
         score += m["points"]
     score = min(score, 100)
@@ -339,8 +443,8 @@ def risk_level(score):
 # PART 3A: BUILDING THE PRETTY HTML PIECES (no Streamlit calls)
 # ============================================================
 LEVEL_COLORS = {"Low": "#1fa971", "Medium": "#f5a524", "High": "#e03e5a"}
-GROUP_COLORS = {"Warning signs": "#e03e5a", "Missing details": "#f5a524", "Sender check": "#6c4cf1"}
-GROUP_CLASS = {"Warning signs": "w", "Missing details": "m", "Sender check": "s"}
+GROUP_COLORS = {"Warning signs": "#e03e5a", "Missing details": "#f5a524", "Sender check": "#6c4cf1", "Link check": "#0b7285"}
+GROUP_CLASS = {"Warning signs": "w", "Missing details": "m", "Sender check": "s", "Link check": "l"}
 SUMMARY = {
     "High": "Several strong warning signs. Do not pay or share documents.",
     "Medium": "Some warning signs or missing details. Cross-check before replying.",
@@ -368,7 +472,7 @@ EXAMPLE_POOLS = [
    "c": ""
   },
   {
-   "m": "Dear Candidate, your application for the Online Survey internship is approved. Pay Rs 299 as processing fee today only and start earning. Stipend Rs 6000, remote, 1 month. Email: join@surveyhub.in",
+   "m": "Dear Candidate, your application for the Online Survey internship is approved. Pay Rs 299 as processing fee today only and start earning. Stipend Rs 6000, remote, 1 month. Email: join@surveyhub.in. Pay here: http://bit.ly/survey-join-299",
    "s": "",
    "c": ""
   },
@@ -398,7 +502,7 @@ EXAMPLE_POOLS = [
    "c": ""
   },
   {
-   "m": "Work from home product review job for students. Immediately pay the kit fee of Rs 700 to get your login ID. Duration 1 month.",
+   "m": "Work from home product review job for students. Immediately pay the kit fee of Rs 700 to get your login ID. Duration 1 month. Login: http://203.0.113.45/portal",
    "s": "",
    "c": ""
   },
@@ -415,7 +519,7 @@ EXAMPLE_POOLS = [
    "c": "Lumora Analytics"
   },
   {
-   "m": "Hello, your profile fits a 4 month Data Analyst internship at Vertexa Labs, remote, stipend Rs 20000 per month. Confirm immediately as only a few seats are left.",
+   "m": "Hello, your profile fits a 4 month Data Analyst internship at Vertexa Labs, remote, stipend Rs 20000 per month. Confirm immediately as only a few seats are left. Confirm here: tinyurl.com/vertexa-confirm",
    "s": "vertexa.recruitment@yahoo.in",
    "c": "Vertexa Labs"
   },
@@ -774,7 +878,7 @@ with st.container(border=True):
     c1.text_input("Sender's email (optional)", key="sender", placeholder="hr@company.com")
     c2.text_input("Company name (optional)", key="company", placeholder="Company name")
     live = st.checkbox("Run live domain checks (domain age and mail records)", value=True)
-    st.caption("🔒 Privacy: OfferGuard does not save your message in any database, and recent checks last only for this session. With live checks on, only the sender's domain name is looked up, never your message. Avoid pasting your own Aadhaar, PAN or bank details.")
+    st.caption("🔒 Privacy: OfferGuard does not save your message in any database, and recent checks last only for this session. With live checks on, only domain names (the sender's and any in links) are looked up, never your message or the full links. Avoid pasting your own Aadhaar, PAN or bank details.")
     b1, b2 = st.columns([3, 1])
     check_clicked = b1.button("Check offer", type="primary")
     b2.button("Clear", on_click=clear_all)
@@ -812,7 +916,7 @@ if res:
 
     with tab1:
         if res["matches"]:
-            for group in ["Warning signs", "Missing details", "Sender check"]:
+            for group in ["Warning signs", "Missing details", "Sender check", "Link check"]:
                 items = [m for m in res["matches"] if m["group"] == group]
                 if items:
                     st.markdown(f"**{group}**")
@@ -824,7 +928,7 @@ if res:
                            file_name="offerguard-report.txt")
 
     with tab2:
-        words = [w for m in res["matches"] if m["group"] == "Warning signs" for w in m["found"]]
+        words = [w for m in res["matches"] if m["group"] in ("Warning signs", "Link check") for w in m["found"]]
         st.markdown(highlight_html(res["message"], words), unsafe_allow_html=True)
         st.caption("Highlighted phrases triggered a warning sign.")
 
