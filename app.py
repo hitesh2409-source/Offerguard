@@ -165,9 +165,10 @@ def check_sender(sender, company):
 
     if domain in FREE_EMAIL_DOMAINS:
         results.append({
-            "group": "Sender check", "name": "Free email provider used", "points": 25,
-            "reason": "Companies normally email from their own domain, not a free service. "
-                      "A few small startups do use free email, so verify before trusting it.",
+            "group": "Sender check", "name": "Personal email used", "points": 10,
+            "reason": "This is a personal email (like Gmail or Yahoo), not a company email. "
+                      "Companies normally email from their own domain, but some small startups "
+                      "and freelancers use personal email, so verify before trusting it.",
             "found": [domain],
         })
     elif company.strip() != "":
@@ -651,7 +652,7 @@ def check_message(message, sender="", company="", live=True):
 
     # 4) Live checks on the sender's domain (needs internet)
     domain = get_domain(sender)
-    if live and domain and domain not in FREE_EMAIL_DOMAINS:
+    if live and domain:
         matches += check_domain(domain)
 
     # 5) Links inside the message
@@ -980,7 +981,7 @@ def crosscheck_links(company, domain):
             ("Scam reports", google(company + " internship scam")),
             ("Fake offer complaints", google(company + " fake offer letter complaint")),
         ]))
-    if domain and domain not in FREE_EMAIL_DOMAINS:
+    if domain:
         dm = quote_plus(domain)
         groups.append((f"Is {domain} safe, and how old is it?", [
             ("Domain age (ICANN)", "https://lookup.icann.org/en/lookup?name=" + dm),
@@ -988,8 +989,8 @@ def crosscheck_links(company, domain):
             ("VirusTotal", "https://www.virustotal.com/gui/domain/" + dm),
             ("Google Safe Browsing", "https://transparencyreport.google.com/safe-browsing/search?url=" + dm),
         ]))
-    elif domain:
-        groups.append((f"The sender uses a free email ({domain})", [
+    if domain and domain in FREE_EMAIL_DOMAINS:
+        groups.append((f"The sender uses a personal email ({domain})", [
             ("How to check this", google("how to check if a company hr email on gmail is fake")),
         ]))
     groups.append(("Already paid or shared documents?", [
@@ -1590,7 +1591,7 @@ def page_cross():
         else:
             words = _company_words(company)
             if is_free:
-                st.warning(f"The sender uses a free email service ({domain}). A real company normally "
+                st.warning(f"The sender uses a personal email ({domain}). A real company normally "
                            "emails from its own website's domain.")
             elif domain and words:
                 domain_text = domain.replace("-", "").replace(".", "")
@@ -1631,7 +1632,7 @@ def page_cross():
             "5. **In writing:** ask for an offer letter that states the role, duration and pay.")
         st.link_button("Open the MCA portal (official site)", "https://www.mca.gov.in")
         with st.expander("Want to search further? These open in a new tab"):
-            for heading, links in crosscheck_links(company, domain if domain and not is_free else None):
+            for heading, links in crosscheck_links(company, domain):
                 st.markdown(f"**{heading}**")
                 cols = st.columns(len(links))
                 for col, (label, url) in zip(cols, links):
@@ -1643,13 +1644,14 @@ def page_cross():
         if not domain:
             st.info("There is no sender email, so there is no sender domain to look up. Add the "
                     "sender's email on page 1 and check again. Links are checked below.")
-        elif is_free:
-            st.warning(f"**{domain}** is a free email service. Anyone can create an address on it, so "
-                       "it tells you nothing about the company. Ask the recruiter for an email from "
-                       "the company's own domain and check that it matches the company website.")
         else:
             if not res["sender"].strip():
                 st.caption("No sender was entered, so this is the first email address found in the message.")
+            if is_free:
+                st.warning(f"**{domain}** is a personal email service. Anyone can create an address "
+                           "on it, so it tells you nothing about the company. Ask the recruiter for "
+                           "an email from the company's own domain and check that it matches the "
+                           "company website. The age of the domain is shown below.")
             domain_block(domain)
 
         st.markdown("**Links in the message**")
