@@ -1156,7 +1156,7 @@ EXAMPLE_POOLS = [
    "m": "Congratulations! You are selected for a 2 month Content Writing internship at BrightPath Media, work from home, stipend Rs 8000. Confirm your seat here: https://bit.ly/3xBrightPath",
    "s": "",
    "c": "BrightPath Media",
-   "t": "\ud83d\udd17 Shortened link",
+   "t": "🔗 Shortened link",
    "n": "Shortened links hide where they really lead. OfferGuard flags the link (+20) and never opens it. Look at the highlighted link in the 'Your message' tab."
   },
   {
@@ -1177,21 +1177,21 @@ EXAMPLE_POOLS = [
    "m": "Dear Candidate, Vertexa Labs offers you a 4 month Data Analyst internship, remote, stipend Rs 20000 per month, starting 1 February. Please reply to this email to accept.",
    "s": "careers@vertexa-labs.invalid",
    "c": "Vertexa Labs",
-   "t": "\ud83c\udf10 Domain does not exist",
+   "t": "🌐 Domain does not exist",
    "n": "With live checks on, OfferGuard asks the internet if the sender's domain exists. The .invalid ending can never exist, so this demo always shows 'Domain does not exist' (+30)."
   },
   {
    "m": "Dear Ananya, thank you for your interview. Mozilla Foundation is pleased to offer you a 3 month Research internship, remote, stipend Rs 20000 per month, starting 1 February. Please reply to this email to accept.",
    "s": "interns@mozilla.org",
    "c": "Mozilla Foundation",
-   "t": "\ud83c\udf10 Established domain",
+   "t": "🌐 Established domain",
    "n": "The good-sign case (sample text). With live checks on, the Cross-check page shows an old domain with working email, SPF and DMARC. A low score still does not prove an offer is genuine."
   },
   {
    "m": "URGENT! Dear Candidate, you are directly selected for a Data Entry internship at Vertexa Labs, work from home, earn per day. No interview. Pay the Rs 750 registration fee immediately here: https://tinyurl.com/vertexa-pay and share your Aadhaar on WhatsApp.",
    "s": "vertexa.hr@yahoo.in",
    "c": "Vertexa Labs",
-   "t": "\ud83d\udca5 Everything at once",
+   "t": "💥 Everything at once",
    "n": "The full picture: money, sensitive details, pressure, no interview, chat-app contact, a personal email and a payment link behind a shortener. Score 100."
   }
  ]
