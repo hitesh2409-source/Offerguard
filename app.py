@@ -893,6 +893,63 @@ a[data-testid^="stBaseLinkButton"] {width: 100%; justify-content: center; border
 """
 
 
+# ============================================================
+# DARK MODE: extra styles that are added on top of CSS when the
+# visitor presses the theme button. Light mode = CSS only.
+# ============================================================
+DARK_CSS = """
+<style>
+:root {color-scheme: dark;}
+.stApp {background-color: #14111f !important; color: #ece8f7 !important;}
+[data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stHeader"] {
+  background-color: transparent !important;}
+[data-testid="stAppViewContainer"] {
+  background-image: radial-gradient(520px 320px at 92% 0, rgba(255,143,171,.10), transparent),
+                    radial-gradient(520px 360px at 0 8%, rgba(142,197,255,.10), transparent) !important;}
+.stApp :is(h1, h2, h3, h4, h5, h6, strong, b, th, td, li, label, [data-testid="stWidgetLabel"] p),
+.stApp [data-testid="stMarkdownContainer"] p:not([class]) {color: #ece8f7 !important;}
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] * {color: #b4adca !important;}
+.stApp a:not([data-testid^="stBaseLinkButton"]) {color: #b4a3ff;}
+.og-title span {color: #a28bff !important;}
+.og-card {background: rgba(255,255,255,.06) !important; box-shadow: 0 8px 26px rgba(0,0,0,.35) !important;
+  border-color: rgba(255,255,255,.14) !important;}
+.og-f {background: rgba(255,255,255,.06) !important;}
+.og-chip.ok {background: #1fa97133; color: #5be2b0;}
+.og-chip.warn {background: #f5a52433; color: #ffc766;}
+.og-chip.bad {background: #e03e5a33; color: #ff8fa3;}
+.og-chip.info {background: #6c4cf144; color: #c2b5ff;}
+.og-verdict.ok {color: #5be2b0;} .og-verdict.warn {color: #ffc766;}
+.og-verdict.bad {color: #ff8fa3;} .og-verdict.info {color: #c2b5ff;}
+.stApp :is([data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="textarea"],
+           [data-baseweb="select"] > div) {
+  background-color: #1f1b2e !important; border-color: rgba(255,255,255,.18) !important;}
+.stApp :is(input, textarea) {background-color: #1f1b2e !important; color: #ece8f7 !important;
+  -webkit-text-fill-color: #ece8f7 !important;}
+.stApp ::placeholder {color: #8c86a3 !important; -webkit-text-fill-color: #8c86a3 !important; opacity: 1;}
+button[data-baseweb="tab"] {color: #b4adca !important;}
+button[data-baseweb="tab"][aria-selected="true"] {color: #ffffff !important;}
+[data-baseweb="tab-border"] {background-color: rgba(255,255,255,.15) !important;}
+button[data-testid^="stBaseButton-secondary"], a[data-testid^="stBaseLinkButton"] {
+  background-color: #1f1b2e !important; color: #ece8f7 !important;
+  border: 1px solid rgba(255,255,255,.2) !important;}
+button[data-testid^="stBaseButton-secondary"]:hover, a[data-testid^="stBaseLinkButton"]:hover {
+  border-color: #a28bff !important; color: #ffffff !important;}
+[data-testid="stExpander"] {border-color: rgba(255,255,255,.15) !important;
+  background: rgba(255,255,255,.04) !important;}
+[data-testid="stExpander"] details, [data-testid="stExpander"] summary {
+  background: transparent !important; color: #ece8f7 !important;}
+[data-testid="stAlert"] {background-color: rgba(255,255,255,.07) !important;
+  border: 1px solid rgba(255,255,255,.14) !important;}
+[data-testid="stAlert"] * {color: #ece8f7 !important;}
+[data-testid="stAlert"]:has([data-testid="stAlertContentWarning"]) {border-left: 5px solid #f5a524 !important;}
+[data-testid="stAlert"]:has([data-testid="stAlertContentError"]) {border-left: 5px solid #e03e5a !important;}
+[data-testid="stAlert"]:has([data-testid="stAlertContentSuccess"]) {border-left: 5px solid #1fa971 !important;}
+[data-testid="stAlert"]:has([data-testid="stAlertContentInfo"]) {border-left: 5px solid #6c4cf1 !important;}
+code, pre {background-color: #1f1b2e !important; color: #ece8f7 !important;}
+</style>
+"""
+
+
 def gauge_html(score, level):
     color = LEVEL_COLORS[level]
     offset = 141.4 * (1 - score / 100)
@@ -1382,9 +1439,13 @@ st.markdown(CSS, unsafe_allow_html=True)
 STATE_KEYS = ["msg", "sender", "company", "live"]
 
 for key, default in [("msg", ""), ("sender", ""), ("company", ""), ("live", True),
-                     ("result", None), ("history", []), ("field", "Any"), ("page", "check")]:
+                     ("result", None), ("history", []), ("field", "Any"), ("page", "check"),
+                     ("dark", False)]:
     if key not in st.session_state:
         st.session_state[key] = default
+
+if st.session_state.dark:
+    st.markdown(DARK_CSS, unsafe_allow_html=True)
 
 if "example_idx" not in st.session_state:
     st.session_state.example_idx = [random.randrange(len(p)) for p in EXAMPLE_POOLS]
@@ -1431,6 +1492,11 @@ def clear_all():
 
 def enable_live():
     st.session_state.live = True
+
+
+def toggle_theme():
+    """Switch between light and dark mode."""
+    st.session_state.dark = not st.session_state.dark
 
 
 # ============================================================
@@ -1731,9 +1797,12 @@ def page_cross():
 # ============================================================
 # THE PAGE: header, the two-page menu, then the chosen page
 # ============================================================
-st.markdown('<p class="og-title">🛡️ Offer<span>Guard</span></p>'
-            '<p class="og-sub">Paste an internship or job offer. Get a risk score, the exact red flags, '
-            'and where to cross-check them.</p>', unsafe_allow_html=True)
+head_left, head_right = st.columns([5, 1.4])
+head_left.markdown('<p class="og-title">🛡️ Offer<span>Guard</span></p>'
+                   '<p class="og-sub">Paste an internship or job offer. Get a risk score, the exact red flags, '
+                   'and where to cross-check them.</p>', unsafe_allow_html=True)
+head_right.button("☀️ Light" if st.session_state.dark else "🌙 Dark", on_click=toggle_theme,
+                  key="theme_btn", help="Switch between light and dark mode")
 
 page = st.session_state.page
 nav1, nav2 = st.columns(2)
