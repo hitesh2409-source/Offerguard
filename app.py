@@ -1,6 +1,7 @@
 import html
 import random
 import re
+import time
 from datetime import datetime, timezone
 from urllib.parse import quote_plus, urlparse
 
@@ -192,49 +193,155 @@ def root_domain(domain):
     return ".".join(parts[-2:])
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def lookup_domain_age(domain):
-    """Ask the free RDAP service when a domain was registered.
-    Returns the age in days, or None if we could not find out."""
-    try:
-        r = requests.get("https://rdap.org/domain/" + domain, timeout=8,
-                         headers={"Accept": "application/rdap+json"})
-        if r.status_code != 200:
-            return None
-        for event in r.json().get("events", []):
-            if event.get("eventAction") == "registration":
-                date = datetime.fromisoformat(event["eventDate"].replace("Z", "+00:00"))
-                if date.tzinfo is None:
-                    date = date.replace(tzinfo=timezone.utc)
-                return (datetime.now(timezone.utc) - date).days
-    except Exception:
-        return None
+# ============================================================
+# LIVE LOOKUPS: domain age (RDAP) and mail records (DNS)
+# These talk to free public services, so they can fail. The code:
+#   - sends a proper User-Agent (some servers reject the default one)
+#   - retries once on timeouts, 429 and 5xx errors
+#   - has a backup service for each lookup
+#   - NEVER remembers a failure (only good answers are cached)
+#   - tells you the real reason when a lookup fails
+# ============================================================
+HTTP_HEADERS = {"User-Agent": "OfferGuard/1.0 (student scam checker)",
+                "Accept": "application/json"}
+HTTP_TIMEOUT = 6
+CACHE_SECONDS = 3600
+
+
+@st.cache_resource
+def _lookup_cache():
+    """One dictionary shared by every visitor. Only successful lookups are stored."""
+    return {}
+
+
+def _cache_get(key):
+    entry = _lookup_cache().get(key)
+    if entry and time.time() - entry[0] < CACHE_SECONDS:
+        return entry[1]
     return None
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
+def _cache_put(key, value):
+    _lookup_cache()[key] = (time.time(), value)
+
+
+def _get_json(url, params=None, headers=None):
+    """GET a URL. Returns (json, "") on success or (None, short reason) on failure."""
+    reason = "unknown error"
+    for attempt in range(2):
+        try:
+            r = requests.get(url, params=params, timeout=HTTP_TIMEOUT,
+                             headers={**HTTP_HEADERS, **(headers or {})})
+            if r.status_code == 200:
+                return r.json(), ""
+            reason = f"HTTP {r.status_code}"
+            if r.status_code not in (429, 500, 502, 503, 504):
+                break  # retrying will not help (for example 404)
+        except requests.exceptions.Timeout:
+            reason = "timed out"
+        except requests.exceptions.ConnectionError:
+            reason = "could not connect"
+        except ValueError:
+            reason = "unreadable reply"
+            break
+        except Exception as e:
+            reason = type(e).__name__
+            break
+        if attempt == 0:
+            time.sleep(0.6)
+    return None, reason
+
+
+def _rdap_urls(domain):
+    """First the rdap.org redirector, then (only if needed) the registry's own server."""
+    yield "https://rdap.org/domain/" + domain
+    tld = domain.rsplit(".", 1)[-1].lower()
+    boot, _ = _get_json("https://data.iana.org/rdap/dns.json")
+    for names, urls in (boot or {}).get("services", []):
+        if tld in names and urls:
+            base = urls[0] if urls[0].endswith("/") else urls[0] + "/"
+            yield base + "domain/" + domain
+            return
+
+
+def _age_from_rdap(data):
+    """Days since the 'registration' event, or None if the reply has no such event."""
+    for event in data.get("events", []):
+        if event.get("eventAction") == "registration":
+            text = re.sub(r"\.\d+", "", event["eventDate"]).replace("Z", "+00:00")
+            date = datetime.fromisoformat(text)
+            if date.tzinfo is None:
+                date = date.replace(tzinfo=timezone.utc)
+            return (datetime.now(timezone.utc) - date).days
+    return None
+
+
+def lookup_domain_age(domain):
+    """Returns (age_in_days, reason). age is None if we could not find out; reason says why."""
+    key = "age:" + domain
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached, ""
+    reason = "no answer"
+    for url in _rdap_urls(domain):
+        data, err = _get_json(url, headers={"Accept": "application/rdap+json"})
+        if data is None:
+            reason = err
+            continue
+        try:
+            age = _age_from_rdap(data)
+        except (ValueError, KeyError, TypeError, AttributeError):
+            age = None
+        if age is not None and age >= 0:
+            _cache_put(key, age)
+            return age, ""
+        reason = "the registry reply had no registration date"
+    return None, reason
+
+
+def _dns_query(name, record_type):
+    """Ask Google DNS, then Cloudflare DNS. Returns (status, has_answer, reason).
+    status is 0 (found), 3 (domain does not exist) or None (both services failed)."""
+    providers = [("https://dns.google/resolve", {}),
+                 ("https://cloudflare-dns.com/dns-query", {"Accept": "application/dns-json"})]
+    reason = "no answer"
+    for url, extra in providers:
+        data, err = _get_json(url, params={"name": name, "type": record_type}, headers=extra)
+        if data is None:
+            reason = err
+            continue
+        status = data.get("Status")
+        if status in (0, 3):
+            return status, bool(data.get("Answer")), ""
+        reason = f"DNS error code {status}"
+    return None, False, reason
+
+
 def lookup_mail_dns(domain):
-    """Ask Google's free DNS service if the domain exists and can get email.
-    Returns 'ok', 'no_domain', 'no_mail' or 'unknown'."""
-    try:
-        for record_type in ["MX", "A"]:
-            r = requests.get("https://dns.google/resolve",
-                             params={"name": domain, "type": record_type}, timeout=8)
-            data = r.json()
-            if data.get("Status") == 3:
-                return "no_domain"
-            if data.get("Answer"):
-                return "ok"
-        return "no_mail"
-    except Exception:
-        return "unknown"
+    """Returns (state, reason). state is 'ok', 'no_domain', 'no_mail' or 'unknown'."""
+    key = "dns:" + domain
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached, ""
+    for record_type in ["MX", "A"]:
+        status, has_answer, reason = _dns_query(domain, record_type)
+        if status is None:
+            return "unknown", reason  # a failure: do not cache
+        if status == 3:
+            _cache_put(key, "no_domain")
+            return "no_domain", ""
+        if has_answer:
+            _cache_put(key, "ok")
+            return "ok", ""
+    _cache_put(key, "no_mail")
+    return "no_mail", ""
 
 
 def check_domain(domain, group="Sender check", label=""):
     """Live checks on the sender's domain. Returns a list of findings."""
     results = []
 
-    dns = lookup_mail_dns(domain)
+    dns, dns_reason = lookup_mail_dns(domain)
     if dns == "no_domain":
         results.append({
             "group": group, "name": label + "Domain does not exist", "points": 30,
@@ -247,13 +354,20 @@ def check_domain(domain, group="Sender check", label=""):
             "reason": "The domain exists but has no mail records, which is unusual for a real company.",
             "found": [domain],
         })
+    elif dns == "unknown":
+        results.append({
+            "group": group, "name": "Mail records could not be checked", "points": 0,
+            "reason": f"The DNS lookup failed ({dns_reason}). This is a connection problem, "
+                      "so it does not count against the offer. Try again in a moment.",
+            "found": [domain],
+        })
 
-    age = lookup_domain_age(root_domain(domain))
+    age, age_reason = lookup_domain_age(root_domain(domain))
     if age is None:
         results.append({
             "group": group, "name": "Domain age could not be checked", "points": 0,
-            "reason": "The registry did not return a registration date. This is common for some "
-                      "domain endings, so it does not count against the offer.",
+            "reason": f"The lookup failed ({age_reason}). This can be a connection problem or a "
+                      "domain ending the registry does not cover, so it does not count against the offer.",
             "found": [domain],
         })
     elif age < 30:
