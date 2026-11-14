@@ -860,7 +860,7 @@ footer, [data-testid="stToolbar"] {visibility: hidden;}
 [data-testid="stAppViewContainer"] {
   background-image: radial-gradient(520px 320px at 92% 0, rgba(255,143,171,.25), transparent),
                     radial-gradient(520px 360px at 0 8%, rgba(142,197,255,.28), transparent);}
-.og-title {font-size: 2.3rem; font-weight: 800; margin: 0; line-height: 1.2;}
+.og-title {font-size: 2.3rem !important; font-weight: 800 !important; margin: 0; line-height: 1.2 !important;}
 .og-title span {color: #6c4cf1;}
 .og-sub {opacity: .75; margin: 4px 0 14px;}
 .og-card {border: 1px solid rgba(128,128,128,.28); border-radius: 20px; padding: 16px 18px;
@@ -910,6 +910,20 @@ html, body {background-color: #14111f !important;}
                     radial-gradient(520px 360px at 0 8%, #cfd9fb, transparent) !important;}
 .stApp img, .stApp video, button[data-testid="stBaseButton-primary"] {
   filter: invert(1) hue-rotate(180deg);}
+
+/* Lighter purple-black boxes with clear edges (colours are set BEFORE the flip). */
+.stApp :is([data-baseweb="input"], [data-baseweb="textarea"]) {
+  border: 1px solid #b8abf1 !important; background-color: #e4dffa !important;}
+.stApp :is([data-baseweb="base-input"], textarea, input) {background-color: #e4dffa !important;}
+.stApp :is([data-baseweb="input"], [data-baseweb="textarea"]):focus-within {border-color: #7c68ec !important;}
+button[data-testid^="stBaseButton-secondary"], a[data-testid^="stBaseLinkButton"] {
+  background-color: #dcd3ff !important; border: 1px solid #b8abf1 !important;}
+button[data-testid^="stBaseButton-secondary"]:hover, a[data-testid^="stBaseLinkButton"]:hover {
+  border-color: #7c68ec !important;}
+.og-card {background-color: #e8e4fe !important;}
+.og-card:not([style*="border-left"]) {border: 1px solid #b8abf1 !important;}
+.og-card[style*="border-left"] {border-top: 1px solid #b8abf1 !important; border-right: 1px solid #b8abf1 !important; border-bottom: 1px solid #b8abf1 !important;}
+[data-testid="stExpander"] {border-color: #b8abf1 !important;}
 </style>
 """
 
