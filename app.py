@@ -2103,6 +2103,27 @@ def toggle_theme():
 # ============================================================
 # PAGE 1: CHECK AN OFFER
 # ============================================================
+def genuine_section(key, level=None):
+    """Sends everyone to trusted places to find real internships (LinkedIn, Internshala ...)."""
+    title = ("🌱 Skip this offer and apply on trusted platforms instead" if level == "High"
+             else "🌱 Looking for a real internship? Apply only through trusted platforms")
+    st.markdown(f'<div class="og-card" style="border-left:6px solid #1fa971"><b>{title}</b>'
+                '<div style="opacity:.8;margin-top:4px;font-size:.93rem">Genuine listings never ask you to pay '
+                'to get selected. Pick your field and open a trusted site.</div></div>', unsafe_allow_html=True)
+    if key not in st.session_state:
+        st.session_state[key] = st.session_state.field
+    field = st.radio("Field", list(FIELDS), key=key, horizontal=True, label_visibility="collapsed")
+    st.session_state.field = field
+    platforms, official = genuine_links(field)
+    cols = st.columns(len(platforms))
+    for col, (label, url) in zip(cols, platforms):
+        col.link_button(label, url)
+    with st.expander("Government and college portals"):
+        cols = st.columns(2)
+        for i, (label, url) in enumerate(official):
+            cols[i % 2].link_button(label, url)
+
+
 def page_check():
     for k in STATE_KEYS:
         if "w_" + k not in st.session_state:
@@ -2201,6 +2222,8 @@ def page_check():
 
         st.button("🧭 Continue to Cross-check  →", on_click=goto, args=("cross",),
                   key="to_cross", type="primary")
+
+    genuine_section("w_field_home", res["level"] if res else None)
 
     if st.session_state.history:
         with st.expander("Recent checks (this session)"):
