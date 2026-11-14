@@ -1222,6 +1222,55 @@ button[data-baseweb="tab"]:hover {background: rgba(108,76,241,.09);}
 .og-f:nth-child(2) {animation-delay: .05s;} .og-f:nth-child(3) {animation-delay: .1s;} .og-f:nth-child(4) {animation-delay: .15s;}
 .og-f:nth-child(5) {animation-delay: .2s;} .og-f:nth-child(n+6) {animation-delay: .25s;}
 
+
+/* ---------- flying text boxes, drifting background, floating badge ---------- */
+@keyframes og-float {0%,100% {transform: translateY(0) rotate(var(--r));} 50% {transform: translateY(-14px) rotate(calc(var(--r) * -1));}}
+@keyframes og-in-l {from {opacity: 0; transform: translateX(-90px) rotate(-10deg) scale(.8);}}
+@keyframes og-in-r {from {opacity: 0; transform: translateX(90px) rotate(10deg) scale(.8);}}
+@keyframes og-fly-l {from {opacity: 0; transform: translateX(-70px) rotate(-3deg);}}
+@keyframes og-fly-r {from {opacity: 0; transform: translateX(70px) rotate(3deg);}}
+@keyframes og-pop {from {opacity: 0; transform: scale(.6) translateY(20px);}}
+@keyframes og-roll {0%,20% {transform: translateY(0);} 25%,45% {transform: translateY(-1.3em);} 50%,70% {transform: translateY(-2.6em);} 75%,99.9% {transform: translateY(-3.9em);} 100% {transform: translateY(0);}}
+@keyframes og-rise {from {transform: translateY(0) translateX(0) rotate(0); opacity: 0;} 10%,85% {opacity: .22;} 50% {transform: translateY(-55vh) translateX(28px) rotate(25deg);} to {transform: translateY(-115vh) translateX(-18px) rotate(-15deg); opacity: 0;}}
+@keyframes og-orb {0%,100% {transform: translate(0,0) scale(1);} 50% {transform: translate(40px,-30px) scale(1.15);}}
+@keyframes og-bob {0%,100% {transform: translateY(0);} 50% {transform: translateY(-7px);}}
+
+.og-f:nth-child(odd) {animation-name: og-fly-l; animation-duration: .7s; animation-timing-function: cubic-bezier(.2,1.2,.4,1);}
+.og-f:nth-child(even) {animation-name: og-fly-r; animation-duration: .7s; animation-timing-function: cubic-bezier(.2,1.2,.4,1);}
+.og-tile {animation-name: og-pop; animation-duration: .6s; animation-timing-function: cubic-bezier(.2,1.4,.4,1);}
+.og-tile:nth-child(2) {animation-delay: .08s;} .og-tile:nth-child(3) {animation-delay: .16s;} .og-tile:nth-child(4) {animation-delay: .24s;}
+
+[data-testid="stMainBlockContainer"] {position: relative; z-index: 1;}
+.og-bg {position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden;}
+.og-orb {position: absolute; border-radius: 50%; filter: blur(46px); opacity: .35; animation: og-orb 14s ease-in-out infinite;}
+.og-drift {position: absolute; bottom: -60px; font-size: 1.8rem; opacity: 0; animation: og-rise 24s linear infinite;}
+
+.og-stage {position: relative; height: 270px; margin: 6px 0 4px;}
+.og-center {position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 22%;}
+.og-rot {font-size: 1.7rem; font-weight: 800; line-height: 1.3;}
+.og-words {display: inline-block; height: 1.3em; overflow: hidden; vertical-align: bottom;}
+.og-words > span {display: block; animation: og-roll 10s cubic-bezier(.7,0,.2,1) infinite;}
+.og-words b {display: block; height: 1.3em; color: #6c4cf1;} .og-words b.r {color: #e03e5a;} .og-words b.g {color: #1fa971;}
+.og-center p {opacity: .7; margin: 6px 0 0; font-size: .92rem;}
+.og-bubble {position: absolute; max-width: 42%; padding: 9px 14px; border-radius: 18px; font-size: .84rem; font-weight: 700; line-height: 1.25;
+  border: 1px solid rgba(128,128,128,.3); background: rgba(255,255,255,.78); box-shadow: 0 10px 26px rgba(108,76,241,.16); cursor: default;
+  --r: 1.5deg; animation: og-in-l .8s cubic-bezier(.2,1.2,.4,1) both, og-float var(--t,6s) ease-in-out var(--d,0s) infinite;
+  transition: scale .2s ease;}
+.og-bubble.right {animation-name: og-in-r, og-float;}
+.og-bubble:hover {scale: 1.1; animation-play-state: running, paused; z-index: 3;}
+.og-bubble.bad {border-color: #e03e5a88; color: #b3213b;} .og-bubble.warn {border-color: #f5a52499; color: #a86300;} .og-bubble.good {border-color: #1fa97188; color: #13805a;}
+.og-bubble::after {content: ""; position: absolute; bottom: -7px; left: 22px; width: 14px; height: 14px; background: inherit; border: inherit; border-top: 0; border-left: 0; transform: rotate(45deg);}
+.og-bubble.right::after {left: auto; right: 22px;}
+.og-b1 {top: 4%; left: 1%; --d: 0s; --t: 6s;} .og-b2 {top: 2%; right: 1%; --d: .6s; --t: 7s; --r: -2deg;}
+.og-b3 {top: 40%; left: 0; --d: 1.1s; --t: 5.5s; --r: -1.5deg;} .og-b4 {top: 38%; right: 0; --d: .3s; --t: 6.5s;}
+.og-b5 {bottom: 4%; left: 4%; --d: 1.6s; --t: 7s; --r: 2deg;} .og-b6 {bottom: 6%; right: 3%; --d: .9s; --t: 5.8s; --r: -1.8deg;}
+
+.og-fab {position: fixed; right: 18px; bottom: 18px; z-index: 999; padding: 10px 16px; border-radius: 999px; font-weight: 800; font-size: .9rem;
+  background: rgba(255,255,255,.92); border: 2px solid var(--c); color: var(--c); box-shadow: 0 10px 28px rgba(0,0,0,.18); animation: og-bob 3s ease-in-out infinite, og-pop .6s ease-out both; pointer-events: none;}
+@media (max-width: 640px) {
+  .og-stage {height: 210px;} .og-center {padding: 0; justify-content: flex-end; padding-bottom: 6px;} .og-rot {font-size: 1.3rem;}
+  .og-bubble {font-size: .74rem; max-width: 46%;} .og-b3, .og-b4, .og-b5, .og-b6 {display: none;}
+}
 @media (prefers-reduced-motion: reduce) {* {animation: none !important; transition: none !important;}}
 @media (max-width: 640px) {.og-title {font-size: 1.8rem !important;} .block-container, [data-testid="stMainBlockContainer"] {padding-top: 3.2rem !important;}}
 </style>
@@ -1315,6 +1364,35 @@ def group_header_html(group, items):
     return (f'<div class="og-gh"><span>{GROUP_ICONS[group]} {html.escape(group)}</span>'
             f'<span class="og-chip" style="background:{color}22;color:{color}">'
             f'{len(items)} found · +{pts} pts</span></div>')
+
+
+def hero_stage_html():
+    """Floating text boxes around a rotating headline (shown before the first check)."""
+    bubbles = [("b1", "bad", "", "🚩 “Pay ₹2,000 registration fee”"), ("b2", "good", "right", "✅ Email from the company's own domain"),
+               ("b3", "warn", "", "⚠️ “Reply within 24 hours!”"), ("b4", "good", "right", "🔒 Real offers never charge you"),
+               ("b5", "bad", "", "📲 “Join our Telegram group”"), ("b6", "bad", "right", "🔍 Domain registered 6 days ago")]
+    boxes = "".join(f'<div class="og-bubble og-{b} {k} {side}">{t}</div>' for b, k, side, t in bubbles)
+    return ('<div class="og-stage">' + boxes + '<div class="og-center"><div class="og-rot">Is this offer '
+            '<span class="og-words"><span><b class="g">genuine?</b><b class="r">a scam?</b><b>safe to pay?</b>'
+            '<b class="g">genuine?</b></span></span></div>'
+            '<p>Paste it below and OfferGuard will show you the red flags.</p></div></div>')
+
+
+def bg_html():
+    """Soft drifting shapes behind the page. Purely decorative."""
+    orbs = [("#6c4cf1", 320, "-6%", "8%", 0), ("#ff8fab", 260, "70%", "55%", -5), ("#8ec5ff", 300, "30%", "80%", -9)]
+    icons = [("🛡️", "8%", 0, 22), ("✔️", "26%", 6, 28), ("🔒", "47%", 12, 25), ("📄", "66%", 3, 30), ("🛡️", "84%", 9, 24), ("✅", "94%", 16, 27)]
+    out = "".join(f'<div class="og-orb" style="width:{s}px;height:{s}px;background:{c};left:{x};top:{y};animation-delay:{d}s"></div>'
+                  for c, s, x, y, d in orbs)
+    out += "".join(f'<div class="og-drift" style="left:{x};animation-delay:{d}s;animation-duration:{t}s">{e}</div>'
+                   for e, x, d, t in icons)
+    return f'<div class="og-bg">{out}</div>'
+
+
+def fab_html(res):
+    """A small floating badge that keeps the latest result in view."""
+    c = LEVEL_COLORS[res["level"]]
+    return f'<div class="og-fab" style="--c:{c}">{LEVEL_ICONS[res["level"]]} {res["level"]} risk · {res["score"]}/100</div>'
 
 
 def how_it_works_html():
@@ -1996,6 +2074,7 @@ def page_check():
 
     res = st.session_state.result
     if not res:
+        st.markdown(hero_stage_html(), unsafe_allow_html=True)
         st.markdown(how_it_works_html(), unsafe_allow_html=True)
     if res:
         st.markdown(gauge_html(res["score"], res["level"]), unsafe_allow_html=True)
@@ -2263,7 +2342,7 @@ def page_cross():
 # THE PAGE: header, the two-page menu, then the chosen page
 # ============================================================
 head_left, head_right = st.columns([5, 1.4])
-head_left.markdown(logo_html(st.session_state.dark) +
+head_left.markdown(bg_html() + logo_html(st.session_state.dark) +
                    '<p class="og-sub">Paste an internship or job offer. Get a risk score, the exact red flags, '
                    'and where to cross-check them.</p>'
                    '<div class="og-trust"><span class="og-chip ok">🔒 Nothing saved</span>'
@@ -2283,5 +2362,8 @@ if page == "cross":
     page_cross()
 else:
     page_check()
+
+if st.session_state.result:
+    st.markdown(fab_html(st.session_state.result), unsafe_allow_html=True)
 
 st.caption("OfferGuard shows warning signs, not a verdict. A low score does not prove an offer is genuine.")
