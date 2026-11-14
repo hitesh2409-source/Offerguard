@@ -3,7 +3,7 @@ import random
 import re
 import time
 from datetime import datetime, timezone
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import quote, quote_plus, urlparse
 
 import requests
 import streamlit as st
@@ -269,21 +269,57 @@ def _rdap_urls(domain):
             return
 
 
-def _age_from_rdap(data):
-    """Days since the 'registration' event, or None if the reply has no such event."""
-    for event in data.get("events", []):
-        if event.get("eventAction") == "registration":
-            text = re.sub(r"\.\d+", "", event["eventDate"]).replace("Z", "+00:00")
-            date = datetime.fromisoformat(text)
-            if date.tzinfo is None:
-                date = date.replace(tzinfo=timezone.utc)
-            return (datetime.now(timezone.utc) - date).days
-    return None
+def _parse_date(text):
+    """Read an RDAP date such as 2019-05-05T07:00:00.000Z."""
+    text = re.sub(r"\.\d+", "", str(text)).replace("Z", "+00:00")
+    date = datetime.fromisoformat(text)
+    if date.tzinfo is None:
+        date = date.replace(tzinfo=timezone.utc)
+    return date
 
 
-def lookup_domain_age(domain):
-    """Returns (age_in_days, reason). age is None if we could not find out; reason says why."""
-    key = "age:" + domain
+def _registrar_name(data):
+    try:
+        for entity in data.get("entities", []):
+            if "registrar" in entity.get("roles", []):
+                for item in (entity.get("vcardArray") or [None, []])[1]:
+                    if item and item[0] == "fn":
+                        return str(item[3])
+    except (IndexError, TypeError, AttributeError):
+        pass
+    return ""
+
+
+def _profile_from_rdap(data):
+    """Turn an RDAP reply into a small dictionary, or None if it has no registration date."""
+    events = {e.get("eventAction"): e.get("eventDate") for e in data.get("events", [])
+              if e.get("eventAction") and e.get("eventDate")}
+    if "registration" not in events:
+        return None
+    registered = _parse_date(events["registration"])
+    age = (datetime.now(timezone.utc) - registered).days
+    if age < 0:
+        return None
+    expires = ""
+    if "expiration" in events:
+        try:
+            expires = _parse_date(events["expiration"]).strftime("%d %b %Y")
+        except ValueError:
+            pass
+    return {
+        "age": age,
+        "registered": registered.strftime("%d %b %Y"),
+        "expires": expires,
+        "registrar": _registrar_name(data),
+        "nameservers": [str(n.get("ldhName", "")).lower() for n in data.get("nameservers", [])
+                        if n.get("ldhName")][:6],
+        "status": [str(s) for s in data.get("status", [])][:6],
+    }
+
+
+def lookup_domain_profile(domain):
+    """Returns (profile_dict, reason). profile is None if we could not find out; reason says why."""
+    key = "rdap:" + domain
     cached = _cache_get(key)
     if cached is not None:
         return cached, ""
@@ -294,18 +330,24 @@ def lookup_domain_age(domain):
             reason = err
             continue
         try:
-            age = _age_from_rdap(data)
+            profile = _profile_from_rdap(data)
         except (ValueError, KeyError, TypeError, AttributeError):
-            age = None
-        if age is not None and age >= 0:
-            _cache_put(key, age)
-            return age, ""
+            profile = None
+        if profile is not None:
+            _cache_put(key, profile)
+            return profile, ""
         reason = "the registry reply had no registration date"
     return None, reason
 
 
-def _dns_query(name, record_type):
-    """Ask Google DNS, then Cloudflare DNS. Returns (status, has_answer, reason).
+def lookup_domain_age(domain):
+    """Returns (age_in_days, reason). age is None if we could not find out."""
+    profile, reason = lookup_domain_profile(domain)
+    return (profile["age"], "") if profile else (None, reason)
+
+
+def _dns_records(name, record_type):
+    """Ask Google DNS, then Cloudflare DNS. Returns (status, answers, reason).
     status is 0 (found), 3 (domain does not exist) or None (both services failed)."""
     providers = [("https://dns.google/resolve", {}),
                  ("https://cloudflare-dns.com/dns-query", {"Accept": "application/dns-json"})]
@@ -317,9 +359,17 @@ def _dns_query(name, record_type):
             continue
         status = data.get("Status")
         if status in (0, 3):
-            return status, bool(data.get("Answer")), ""
+            answers = [str(a.get("data", "")) if isinstance(a, dict) else str(a)
+                       for a in (data.get("Answer") or [])]
+            return status, answers, ""
         reason = f"DNS error code {status}"
-    return None, False, reason
+    return None, [], reason
+
+
+def _dns_query(name, record_type):
+    """Returns (status, has_answer, reason)."""
+    status, answers, reason = _dns_records(name, record_type)
+    return status, bool(answers), reason
 
 
 def lookup_mail_dns(domain):
@@ -340,6 +390,70 @@ def lookup_mail_dns(domain):
             return "ok", ""
     _cache_put(key, "no_mail")
     return "no_mail", ""
+
+
+def lookup_dns_profile(domain):
+    """Mail servers, website address, SPF and DMARC. Returns (profile_dict, reason)."""
+    key = "dnsp:" + domain
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached, ""
+    status, mx, reason = _dns_records(domain, "MX")
+    if status is None:
+        return None, reason
+    if status == 3:
+        profile = {"exists": False, "mx": [], "a": [], "spf": False, "dmarc": False}
+        _cache_put(key, profile)
+        return profile, ""
+    s_a, a_records, _ = _dns_records(domain, "A")
+    s_t, txt, _ = _dns_records(domain, "TXT")
+    s_d, dmarc_txt, _ = _dns_records("_dmarc." + domain, "TXT")
+    profile = {
+        "exists": True,
+        "mx": sorted({m.split()[-1].rstrip(".").lower() for m in mx if m.split()}),
+        "a": [x for x in a_records if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", x)][:4],
+        "spf": None if s_t is None else any(t.strip('"').lower().startswith("v=spf1") for t in txt),
+        "dmarc": None if s_d is None else any(t.strip('"').lower().startswith("v=dmarc1")
+                                              for t in dmarc_txt),
+    }
+    if None not in (s_a, s_t, s_d):  # only remember a complete answer
+        _cache_put(key, profile)
+    return profile, ""
+
+
+def _company_words(name):
+    """The meaningful words of a company name (no Pvt, Ltd, and so on)."""
+    return [w for w in re.findall(r"[a-z0-9]+", name.lower())
+            if len(w) >= 3 and w not in IGNORE_WORDS]
+
+
+def lookup_company_wiki(company):
+    """Look for an encyclopedia page about the company (Wikipedia search).
+    Returns (match_dict_or_None, reason). reason is '' when the lookup itself worked."""
+    name = company.strip()
+    words = _company_words(name)
+    if not words:
+        return None, "the name is too short to look up"
+    key = "wiki:" + name.lower()
+    cached = _cache_get(key)
+    if cached is not None:  # False means: we looked and found nothing
+        return (cached or None), ""
+    data, err = _get_json("https://en.wikipedia.org/w/api.php",
+                          params={"action": "query", "list": "search", "srsearch": name,
+                                  "srlimit": 5, "format": "json"})
+    if data is None:
+        return None, err
+    match = None
+    for hit in (data.get("query", {}).get("search", []) or []):
+        title = str(hit.get("title", ""))
+        squashed = re.sub(r"[^a-z0-9]+", "", title.lower())
+        if all(w in squashed for w in words):  # every real word of the name is in the title
+            snippet = html.unescape(re.sub(r"<[^>]+>", "", str(hit.get("snippet", ""))))
+            match = {"title": title, "snippet": snippet,
+                     "url": "https://en.wikipedia.org/wiki/" + quote(title.replace(" ", "_"))}
+            break
+    _cache_put(key, match or False)
+    return match, ""
 
 
 def check_domain(domain, group="Sender check", label=""):
@@ -763,6 +877,17 @@ div.stButton, div.stDownloadButton, div[data-testid="stButton"], div[data-testid
 div.stButton > button, div.stDownloadButton > button, div[data-testid="stButton"] > button, div[data-testid="stDownloadButton"] > button {width: 100%; border-radius: 999px; font-weight: 700;}
 button[data-testid="stBaseButton-primary"] {background-color: #6c4cf1 !important; border-color: #6c4cf1 !important; color: #fff !important;}
 a[data-testid^="stBaseLinkButton"] {width: 100%; justify-content: center; border-radius: 999px; font-weight: 700;}
+.og-chip {display: inline-block; padding: 3px 11px; border-radius: 999px; font-size: .82rem; font-weight: 700; margin: 2px 6px 2px 0;}
+.og-chip.ok {background: #1fa97122; color: #13805a;}
+.og-chip.warn {background: #f5a52433; color: #a86300;}
+.og-chip.bad {background: #e03e5a22; color: #b3213b;}
+.og-chip.info {background: #6c4cf122; color: #4b32c4;}
+.og-kv {width: 100%; border-collapse: collapse; font-size: .93rem; margin-top: 6px;}
+.og-kv td {padding: 5px 6px; vertical-align: top; border-bottom: 1px solid rgba(128,128,128,.18); word-break: break-word;}
+.og-kv td:first-child {opacity: .7; width: 34%;}
+.og-verdict {margin: 10px 0 0; font-weight: 700; font-size: .93rem;}
+.og-verdict.ok {color: #13805a;} .og-verdict.warn {color: #a86300;}
+.og-verdict.bad {color: #b3213b;} .og-verdict.info {color: #4b32c4;}
 </style>
 """
 
@@ -1183,20 +1308,103 @@ def report_pdf(level, score, matches, message, sender="", company=""):
     return buf.getvalue()
 
 
+def chip_html(text, kind="info"):
+    """A small coloured pill. kind is ok, warn, bad or info."""
+    return f'<span class="og-chip {kind}">{html.escape(text)}</span>'
+
+
+def domain_card_html(domain, prof, prof_err, dns, dns_err, compact=False):
+    """One card with everything we learned about a domain. All text is escaped."""
+    chips = []
+    rows = []
+    if prof:
+        age = prof["age"]
+        kind = "bad" if age < 90 else "warn" if age < 365 else "ok"
+        pretty = f"{age} days" if age < 365 else f"about {age // 365} year(s)"
+        chips.append(chip_html(f"Registered {pretty} ago", kind))
+        rows += [("Registered on", prof["registered"]), ("Registrar", prof["registrar"])]
+        if not compact:
+            rows += [("Expires on", prof["expires"]),
+                     ("Name servers", ", ".join(prof["nameservers"])),
+                     ("Registry status", ", ".join(prof["status"]))]
+    else:
+        chips.append(chip_html("Registration details unavailable", "info"))
+        rows.append(("Registration details", f"Could not be fetched ({prof_err})"))
+
+    if dns:
+        if not dns["exists"]:
+            chips.append(chip_html("Domain does not exist", "bad"))
+        else:
+            chips.append(chip_html("Can receive email" if dns["mx"] else "No mail servers",
+                                   "ok" if dns["mx"] else "warn"))
+            if dns["spf"] is not None:
+                chips.append(chip_html("SPF set" if dns["spf"] else "No SPF", "ok" if dns["spf"] else "warn"))
+            if dns["dmarc"] is not None:
+                chips.append(chip_html("DMARC set" if dns["dmarc"] else "No DMARC",
+                                       "ok" if dns["dmarc"] else "warn"))
+            if not compact:
+                rows += [("Mail servers", ", ".join(dns["mx"][:4])),
+                         ("Website address (IP)", ", ".join(dns["a"] or []))]
+    else:
+        chips.append(chip_html("DNS details unavailable", "info"))
+        rows.append(("DNS records", f"Could not be fetched ({dns_err})"))
+
+    if dns and not dns["exists"]:
+        verdict = ("This domain does not exist. Treat the offer as fake.", "bad")
+    elif prof and prof["age"] < 90:
+        verdict = ("A very new domain. Scam sites are often this young.", "bad")
+    elif (prof and prof["age"] < 365) or (dns and dns["exists"] and not dns["mx"]):
+        verdict = ("A fairly new or incomplete setup. Verify the company before trusting it.", "warn")
+    elif prof and dns and dns["mx"]:
+        verdict = ("An established domain with working email. A good sign, but not proof.", "ok")
+    else:
+        verdict = ("Not enough information to judge this domain.", "info")
+
+    table = "".join(f"<tr><td>{html.escape(k)}</td><td>{html.escape(str(v))}</td></tr>"
+                    for k, v in rows if v)
+    return (f'<div class="og-card"><div style="font-weight:800;font-size:1.02rem;word-break:break-all">'
+            f'{html.escape(domain)}</div><div style="margin:6px 0 2px">{"".join(chips)}</div>'
+            f'<table class="og-kv">{table}</table>'
+            f'<p class="og-verdict {verdict[1]}">{html.escape(verdict[0])}</p></div>')
+
+
 # ============================================================
-# PART 3B: THE WEBSITE
+# PART 3B: THE WEBSITE (two pages)
+#   Page 1 "Check an offer": paste a message, get the score and the reasons.
+#   Page 2 "Cross-check": verify the company, sender and links inside OfferGuard.
 # ============================================================
 st.set_page_config(page_title="OfferGuard", page_icon="🛡️", layout="centered")
 st.markdown(CSS, unsafe_allow_html=True)
 
-for key, default in [("msg", ""), ("sender", ""), ("company", ""), ("result", None),
-                     ("history", []), ("field", "Any")]:
+# Streamlit forgets a box's value when the box is not drawn on the current page.
+# So each input has a plain copy (always kept) and a "w_" copy used by the widget.
+STATE_KEYS = ["msg", "sender", "company", "live"]
+
+for key, default in [("msg", ""), ("sender", ""), ("company", ""), ("live", True),
+                     ("result", None), ("history", []), ("field", "Any"), ("page", "check")]:
     if key not in st.session_state:
         st.session_state[key] = default
 
-
 if "example_idx" not in st.session_state:
     st.session_state.example_idx = [random.randrange(len(p)) for p in EXAMPLE_POOLS]
+
+
+def sync():
+    """Copy what the visitor typed into the plain copies."""
+    for k in STATE_KEYS:
+        if "w_" + k in st.session_state:
+            st.session_state[k] = st.session_state["w_" + k]
+
+
+def goto(page):
+    sync()
+    st.session_state.page = page
+
+
+def set_inputs(msg, sender, company):
+    for k, v in (("msg", msg), ("sender", sender), ("company", company)):
+        st.session_state[k] = v
+        st.session_state["w_" + k] = v
 
 
 def load_example(i):
@@ -1205,126 +1413,304 @@ def load_example(i):
     n = st.session_state.example_idx[i] % len(pool)
     st.session_state.example_idx[i] = (n + 1) % len(pool)
     ex = pool[n]
-    st.session_state.msg = ex["m"]
-    st.session_state.sender = ex["s"]
-    st.session_state.company = ex["c"]
+    set_inputs(ex["m"], ex["s"], ex["c"])
     st.session_state.go = True
 
 
 def load_history(i):
     item = st.session_state.history[i]
-    st.session_state.msg = item["msg"]
-    st.session_state.sender = item["sender"]
-    st.session_state.company = item["company"]
+    set_inputs(item["msg"], item["sender"], item["company"])
     st.session_state.go = True
 
 
 def clear_all():
-    st.session_state.msg = ""
-    st.session_state.sender = ""
-    st.session_state.company = ""
+    set_inputs("", "", "")
     st.session_state.result = None
 
 
-# ---------- Header ----------
-st.markdown('<p class="og-title">🛡️ Offer<span>Guard</span></p>'
-            '<p class="og-sub">Paste an internship or job offer. Get a risk score, the exact red flags, '
-            'and where to cross-check them.</p>', unsafe_allow_html=True)
+def enable_live():
+    st.session_state.live = True
 
-# ---------- Input card ----------
-st.caption("Try an example")
-ex1, ex2, ex3 = st.columns(3)
-ex1.button("🚩 Fee scam", on_click=load_example, args=(0,))
-ex2.button("🕵️ Fake HR email", on_click=load_example, args=(1,))
-ex3.button("✅ Genuine offer", on_click=load_example, args=(2,))
 
-with st.container(border=True):
-    st.text_area("Offer message", key="msg", height=170,
-                 placeholder="Paste the offer message or email here...")
-    c1, c2 = st.columns(2)
-    c1.text_input("Sender's email (optional)", key="sender", placeholder="hr@company.com")
-    c2.text_input("Company name (optional)", key="company", placeholder="Company name")
-    live = st.checkbox("Run live domain checks (domain age and mail records)", value=True)
-    st.caption("🔒 Privacy: OfferGuard does not save your message in any database, and recent checks last only for this session. With live checks on, only domain names (the sender's and any in links) are looked up, never your message or the full links. Avoid pasting your own Aadhaar, PAN or bank details.")
-    b1, b2 = st.columns([3, 1])
-    check_clicked = b1.button("Check offer", type="primary")
-    b2.button("Clear", on_click=clear_all)
+# ============================================================
+# PAGE 1: CHECK AN OFFER
+# ============================================================
+def page_check():
+    for k in STATE_KEYS:
+        if "w_" + k not in st.session_state:
+            st.session_state["w_" + k] = st.session_state[k]
 
-go = check_clicked or st.session_state.pop("go", False)
+    st.caption("Try an example")
+    ex1, ex2, ex3 = st.columns(3)
+    ex1.button("🚩 Fee scam", on_click=load_example, args=(0,))
+    ex2.button("🕵️ Fake HR email", on_click=load_example, args=(1,))
+    ex3.button("✅ Genuine offer", on_click=load_example, args=(2,))
 
-# ---------- Run the check ----------
-if go:
-    message = st.session_state.msg
-    if message.strip() == "":
-        st.warning("Please paste a message first.")
-    else:
-        with st.spinner("Reading the message, matching scam patterns, checking the sender..."):
-            score, matches = check_message(message, st.session_state.sender,
-                                           st.session_state.company, live)
-        level = risk_level(score)
-        st.session_state.result = {
-            "score": score, "matches": matches, "level": level, "message": message,
-            "sender": st.session_state.sender, "company": st.session_state.company,
-        }
-        st.session_state.field = guess_field(message)
-        history = [h for h in st.session_state.history if h["msg"] != message]
-        st.session_state.history = ([{"msg": message[:1500], "sender": st.session_state.sender,
-                                      "company": st.session_state.company,
-                                      "level": level, "score": score}] + history)[:5]
+    with st.container(border=True):
+        st.text_area("Offer message", key="w_msg", height=170,
+                     placeholder="Paste the offer message or email here...")
+        c1, c2 = st.columns(2)
+        c1.text_input("Sender's email (optional)", key="w_sender", placeholder="hr@company.com")
+        c2.text_input("Company name (optional)", key="w_company", placeholder="Company name")
+        st.checkbox("Run live domain checks (domain age and mail records)", key="w_live")
+        st.caption("🔒 Privacy: OfferGuard does not save your message in any database, and recent checks "
+                   "last only for this session. With live checks on, only domain names (the sender's and "
+                   "any in links) and the company name are looked up, never your message or the full "
+                   "links. Avoid pasting your own Aadhaar, PAN or bank details.")
+        b1, b2 = st.columns([3, 1])
+        check_clicked = b1.button("Check offer", type="primary")
+        b2.button("Clear", on_click=clear_all)
+    sync()
 
-# ---------- Show the result ----------
-res = st.session_state.result
-if res:
-    st.markdown(gauge_html(res["score"], res["level"]), unsafe_allow_html=True)
-    st.markdown(action_html(res["level"]), unsafe_allow_html=True)
+    run = check_clicked or st.session_state.pop("go", False)
 
-    tab1, tab2, tab3, tab4 = st.tabs(["🔎 Why this score", "✍️ Your message",
-                                      "🧭 Cross-check", "🌱 Genuine internships"])
-
-    with tab1:
-        if res["matches"]:
-            for group in ["Warning signs", "Missing details", "Sender check", "Link check"]:
-                items = [m for m in res["matches"] if m["group"] == group]
-                if items:
-                    st.markdown(f"**{group}**")
-                    st.markdown("".join(finding_html(m) for m in items), unsafe_allow_html=True)
+    if run:
+        message = st.session_state.msg
+        if message.strip() == "":
+            st.warning("Please paste a message first.")
         else:
-            st.write("No warning signs matched. That does not prove the offer is genuine.")
-        try:
-            pdf_bytes = report_pdf(res["level"], res["score"], res["matches"], res["message"],
-                                   res["sender"], res["company"])
-        except Exception:
-            pdf_bytes = None
-        if pdf_bytes:
-            st.download_button("⬇️ Download PDF report", pdf_bytes,
-                               file_name="offerguard-report.pdf", mime="application/pdf")
+            with st.spinner("Reading the message, matching scam patterns, checking the sender..."):
+                score, matches = check_message(message, st.session_state.sender,
+                                               st.session_state.company, st.session_state.live)
+            level = risk_level(score)
+            st.session_state.result = {
+                "score": score, "matches": matches, "level": level, "message": message,
+                "sender": st.session_state.sender, "company": st.session_state.company,
+            }
+            st.session_state.field = guess_field(message)
+            history = [h for h in st.session_state.history if h["msg"] != message[:1500]]
+            st.session_state.history = ([{"msg": message[:1500], "sender": st.session_state.sender,
+                                          "company": st.session_state.company,
+                                          "level": level, "score": score}] + history)[:5]
+
+    res = st.session_state.result
+    if res:
+        st.markdown(gauge_html(res["score"], res["level"]), unsafe_allow_html=True)
+        st.markdown(action_html(res["level"]), unsafe_allow_html=True)
+
+        tab1, tab2 = st.tabs(["🔎 Why this score", "✍️ Your message"])
+
+        with tab1:
+            if res["matches"]:
+                for group in ["Warning signs", "Missing details", "Sender check", "Link check"]:
+                    items = [m for m in res["matches"] if m["group"] == group]
+                    if items:
+                        st.markdown(f"**{group}**")
+                        st.markdown("".join(finding_html(m) for m in items), unsafe_allow_html=True)
+            else:
+                st.write("No warning signs matched. That does not prove the offer is genuine.")
+            try:
+                pdf_bytes = report_pdf(res["level"], res["score"], res["matches"], res["message"],
+                                       res["sender"], res["company"])
+            except Exception:
+                pdf_bytes = None
+            if pdf_bytes:
+                st.download_button("⬇️ Download PDF report", pdf_bytes,
+                                   file_name="offerguard-report.pdf", mime="application/pdf")
+            else:
+                st.download_button("⬇️ Download report (text)",
+                                   report_text(res["level"], res["score"], res["matches"], res["message"]),
+                                   file_name="offerguard-report.txt")
+                st.caption("The PDF could not be made. Check that 'reportlab' is installed "
+                           "(it is listed in requirements.txt) and restart the app.")
+
+        with tab2:
+            words = [w for m in res["matches"] if m["group"] in ("Warning signs", "Link check")
+                     for w in m["found"]]
+            st.markdown(highlight_html(res["message"], words), unsafe_allow_html=True)
+            st.caption("Highlighted phrases triggered a warning sign.")
+
+        st.button("🧭 Continue to Cross-check  →", on_click=goto, args=("cross",),
+                  key="to_cross", type="primary")
+
+    if st.session_state.history:
+        with st.expander("Recent checks (this session)"):
+            for i, h in enumerate(st.session_state.history):
+                st.button(f"{h['level']} ({h['score']}) · {h['msg'][:60]}...", key=f"hist{i}",
+                          on_click=load_history, args=(i,))
+
+
+# ============================================================
+# PAGE 2: CROSS-CHECK (everything is shown here, nothing sends you to a search page)
+# ============================================================
+def page_cross():
+    res = st.session_state.result
+    st.markdown('<p class="og-title" style="font-size:2rem">🧭 Cross-<span>check</span></p>'
+                '<p class="og-sub">Verify the company, the sender and the links without leaving '
+                'OfferGuard.</p>', unsafe_allow_html=True)
+    if not res:
+        st.info("Check an offer on page 1 first. Then come back here to verify the company, "
+                "the sender and the links.")
+        st.button("←  Go to Check an offer", on_click=goto, args=("check",), key="back_empty")
+        return
+
+    if "w_company" not in st.session_state:
+        st.session_state.w_company = st.session_state.company
+    level, score = res["level"], res["score"]
+    color = LEVEL_COLORS[level]
+    # The sender's domain comes from an email address only (the box, or the first email in
+    # the message). Links are checked separately below.
+    domain = get_domain(res["sender"]) if res["sender"].strip() else None
+    if not domain:
+        emails = re.findall(EMAIL_PATTERN, res["message"].lower())
+        domain = get_domain(emails[0]) if emails else None
+    is_free = bool(domain) and domain in FREE_EMAIL_DOMAINS
+    live = st.session_state.live
+
+    st.markdown(
+        f'<div class="og-card" style="border-left:6px solid {color}">'
+        f'<span class="og-badge" style="background:{color}22;color:{color};font-size:1rem">'
+        f'{html.escape(level)} risk · {score}/100</span>'
+        f'<div style="opacity:.8;margin-top:8px">{html.escape(SUMMARY[level])}</div></div>',
+        unsafe_allow_html=True)
+
+    if not live:
+        st.info("Live lookups are turned off, so domain and company details are not shown.")
+        st.button("Turn on live lookups", on_click=enable_live, key="enable_live")
+
+    def domain_block(host, compact=False):
+        if live:
+            with st.spinner(f"Looking up {host}..."):
+                prof, perr = lookup_domain_profile(root_domain(host))
+                dns, derr = lookup_dns_profile(host)
         else:
-            st.download_button("⬇️ Download report (text)",
-                               report_text(res["level"], res["score"], res["matches"], res["message"]),
-                               file_name="offerguard-report.txt")
-            st.caption("The PDF could not be made. Check that 'reportlab' is installed "
-                       "(it is listed in requirements.txt) and restart the app.")
+            prof, perr, dns, derr = None, "live lookups are off", None, "live lookups are off"
+        st.markdown(domain_card_html(host, prof, perr, dns, derr, compact), unsafe_allow_html=True)
 
-    with tab2:
-        words = [w for m in res["matches"] if m["group"] in ("Warning signs", "Link check") for w in m["found"]]
-        st.markdown(highlight_html(res["message"], words), unsafe_allow_html=True)
-        st.caption("Highlighted phrases triggered a warning sign.")
+    t_company, t_sender, t_help, t_genuine = st.tabs(
+        ["🏢 Company", "🌐 Sender and links", "🚨 Report and get help", "🌱 Genuine internships"])
 
-    with tab3:
-        domain = link_domain(res["sender"], res["message"])
-        groups = crosscheck_links(res["company"], domain)
-        if not res["company"].strip() and not domain:
-            st.info("Add the company name and the sender's email above to unlock company and website checks.")
-        for heading, links in groups:
-            st.markdown(f"**{heading}**")
-            cols = st.columns(len(links))
-            for col, (label, url) in zip(cols, links):
-                col.link_button(label, url)
+    # ---------- Company ----------
+    with t_company:
+        st.text_input("Company name", key="w_company", placeholder="Company name from the offer")
+        company = st.session_state.w_company.strip()
+        st.session_state.company = company
+        if not company:
+            st.info("Type the company name above to run the company checks.")
+        else:
+            words = _company_words(company)
+            if is_free:
+                st.warning(f"The sender uses a free email service ({domain}). A real company normally "
+                           "emails from its own website's domain.")
+            elif domain and words:
+                domain_text = domain.replace("-", "").replace(".", "")
+                if any(w in domain_text for w in words):
+                    st.success(f"The domain **{domain}** matches the company name.")
+                else:
+                    st.warning(f"The domain **{domain}** does not clearly match the company name. "
+                               "Check the company's real website for its official email domain.")
+            else:
+                st.info("There is no sender email to compare with the company name.")
 
-    with tab4:
+            if live:
+                with st.spinner("Looking for public information about the company..."):
+                    match, err = lookup_company_wiki(company)
+                st.markdown("**Public information**")
+                if match:
+                    st.markdown(f'<div class="og-card"><b>{html.escape(match["title"])}</b>'
+                                f'<div style="margin-top:4px">{html.escape(match["snippet"])}…</div></div>',
+                                unsafe_allow_html=True)
+                    st.link_button("Read the full encyclopedia page", match["url"])
+                    st.caption("A public page means the name belongs to a known organisation. It does "
+                               "not prove that this particular offer really came from it.")
+                elif err:
+                    st.info(f"The encyclopedia could not be reached right now ({err}).")
+                else:
+                    st.info("No encyclopedia page was found for this name. Small and new companies often "
+                            "have none, so this alone says nothing good or bad.")
+
+        st.markdown("**How to confirm a company is real**")
+        st.markdown(
+            "1. **Registration:** a registered Indian company has a 21-character CIN. Search its name "
+            "on the MCA portal and make sure the name matches the offer.\n"
+            "2. **Website:** the company should have its own website, and the recruiter's email domain "
+            "should be the same as the website's domain.\n"
+            "3. **LinkedIn:** the company page should have real employees, real posts and a history, "
+            "not just a handful of new accounts.\n"
+            "4. **Call back:** phone the number on the company's own website, not the one in the message.\n"
+            "5. **In writing:** ask for an offer letter that states the role, duration and pay.")
+        st.link_button("Open the MCA portal (official site)", "https://www.mca.gov.in")
+        with st.expander("Want to search further? These open in a new tab"):
+            for heading, links in crosscheck_links(company, domain if domain and not is_free else None):
+                st.markdown(f"**{heading}**")
+                cols = st.columns(len(links))
+                for col, (label, url) in zip(cols, links):
+                    col.link_button(label, url)
+
+    # ---------- Sender and links ----------
+    with t_sender:
+        st.markdown("**Sender's domain**")
+        if not domain:
+            st.info("There is no sender email, so there is no sender domain to look up. Add the "
+                    "sender's email on page 1 and check again. Links are checked below.")
+        elif is_free:
+            st.warning(f"**{domain}** is a free email service. Anyone can create an address on it, so "
+                       "it tells you nothing about the company. Ask the recruiter for an email from "
+                       "the company's own domain and check that it matches the company website.")
+        else:
+            if not res["sender"].strip():
+                st.caption("No sender was entered, so this is the first email address found in the message.")
+            domain_block(domain)
+
+        st.markdown("**Links in the message**")
+        hosts = []
+        for raw in extract_links(res["message"]):
+            host, _ = link_host(raw)
+            if host and "." in host and host not in hosts:
+                hosts.append(host)
+        if not hosts:
+            st.info("The message has no links.")
+        looked_up = 0
+        for host in hosts:
+            if domain and not is_free and root_domain(host) == root_domain(domain):
+                st.caption(f"{host} is the same website as the sender's domain (shown above).")
+            elif is_trusted_link(host):
+                st.success(f"**{host}** is a well-known platform. Pages and forms on it can still be "
+                           "made by anyone, so check who created the one you were sent.")
+            elif host in URL_SHORTENERS:
+                st.warning(f"**{host}** is a link shortener that hides where the link really goes. "
+                           "OfferGuard does not open it. Ask the sender for the full link.")
+            elif re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", host):
+                st.error(f"**{host}** is a raw number, not a website name. Real companies do not use "
+                         "these. Do not open it.")
+            elif looked_up >= 3:
+                st.caption(f"{host}: not looked up (OfferGuard checks at most 3 links).")
+            else:
+                looked_up += 1
+                domain_block(host, compact=True)
+        st.caption("SPF and DMARC are settings that stop others from faking a company's email. Big "
+                   "companies almost always have them, but some small genuine ones do not.")
+
+    # ---------- Report and get help ----------
+    with t_help:
+        st.markdown("**What triggered the alarm**")
+        alarms = [m for m in res["matches"] if m["group"] != "Missing details" and m["points"] > 0]
+        if alarms:
+            st.markdown("".join(finding_html(m) for m in alarms), unsafe_allow_html=True)
+        else:
+            st.write("No strong warning signs were found in this message. A low score still does not "
+                     "prove the offer is genuine.")
+        st.markdown("**If you already paid or shared documents**")
+        st.markdown(
+            "1. Call **1930**, the national cybercrime helpline, as soon as possible.\n"
+            "2. Tell your bank right away and ask them to block or flag the payment.\n"
+            "3. File a complaint on the national cybercrime portal.\n"
+            "4. If you shared Aadhaar, PAN or passwords, change the passwords and watch your accounts.")
+        st.link_button("Report on cybercrime.gov.in", "https://cybercrime.gov.in")
+        st.markdown("**Keep the evidence**")
+        st.markdown(
+            "- Take screenshots of the messages, the sender's number or email, and any payment page.\n"
+            "- Save the payment receipt or transaction ID.\n"
+            "- Do not delete the chat. Tell your college placement cell and a trusted senior.")
+
+    # ---------- Genuine internships ----------
+    with t_genuine:
         st.caption("Trusted places to look instead. Pick a field to update the searches.")
-        field = st.radio("Field", list(FIELDS), key="field", horizontal=True,
+        if "w_field" not in st.session_state:
+            st.session_state.w_field = st.session_state.field
+        field = st.radio("Field", list(FIELDS), key="w_field", horizontal=True,
                          label_visibility="collapsed")
+        st.session_state.field = field
         platforms, official = genuine_links(field)
         st.markdown(f"**Popular platforms ({field})**")
         cols = st.columns(len(platforms))
@@ -1337,11 +1723,26 @@ if res:
         st.caption("Real listings never ask you to pay to get selected. Apply through the platform "
                    "or the company's own careers page.")
 
-# ---------- Recent checks ----------
-if st.session_state.history:
-    with st.expander("Recent checks (this session)"):
-        for i, h in enumerate(st.session_state.history):
-            st.button(f"{h['level']} ({h['score']}) · {h['msg'][:60]}...", key=f"hist{i}",
-                      on_click=load_history, args=(i,))
+    st.button("←  Back to Check an offer", on_click=goto, args=("check",), key="back_bottom")
+
+
+# ============================================================
+# THE PAGE: header, the two-page menu, then the chosen page
+# ============================================================
+st.markdown('<p class="og-title">🛡️ Offer<span>Guard</span></p>'
+            '<p class="og-sub">Paste an internship or job offer. Get a risk score, the exact red flags, '
+            'and where to cross-check them.</p>', unsafe_allow_html=True)
+
+page = st.session_state.page
+nav1, nav2 = st.columns(2)
+nav1.button("1 · Check an offer", on_click=goto, args=("check",), key="nav_check",
+            type="primary" if page == "check" else "secondary")
+nav2.button("2 · Cross-check", on_click=goto, args=("cross",), key="nav_cross",
+            type="primary" if page == "cross" else "secondary")
+
+if page == "cross":
+    page_cross()
+else:
+    page_check()
 
 st.caption("OfferGuard shows warning signs, not a verdict. A low score does not prove an offer is genuine.")
