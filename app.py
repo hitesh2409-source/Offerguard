@@ -774,6 +774,7 @@ with st.container(border=True):
     c1.text_input("Sender's email (optional)", key="sender", placeholder="hr@company.com")
     c2.text_input("Company name (optional)", key="company", placeholder="Company name")
     live = st.checkbox("Run live domain checks (domain age and mail records)", value=True)
+    st.caption("🔒 Privacy: OfferGuard does not save your message in any database, and recent checks last only for this session. With live checks on, only the sender's domain name is looked up, never your message. Avoid pasting your own Aadhaar, PAN or bank details.")
     b1, b2 = st.columns([3, 1])
     check_clicked = b1.button("Check offer", type="primary")
     b2.button("Clear", on_click=clear_all)
