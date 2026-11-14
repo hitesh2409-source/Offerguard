@@ -1,8 +1,10 @@
+import base64
 import html
 import random
 import re
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import quote, quote_plus, urlparse
 
 import requests
@@ -1409,7 +1411,30 @@ def domain_card_html(domain, prof, prof_err, dns, dns_err, compact=False):
 #   Page 1 "Check an offer": paste a message, get the score and the reasons.
 #   Page 2 "Cross-check": verify the company, sender and links inside OfferGuard.
 # ============================================================
-st.set_page_config(page_title="OfferGuard", page_icon="🛡️", layout="centered")
+# Logo files sit next to app.py: logo.png (light page), logo_dark.png (dark page), icon.png (tab icon).
+# If a file is missing, the app falls back to the plain text title and the shield emoji.
+APP_DIR = Path(__file__).resolve().parent
+
+
+@st.cache_resource
+def _logo_data(name):
+    try:
+        return base64.b64encode((APP_DIR / name).read_bytes()).decode()
+    except OSError:
+        return ""
+
+
+def logo_html(dark):
+    data = _logo_data("logo_dark.png" if dark else "logo.png")
+    if not data:
+        return '<p class="og-title">🛡️ Offer<span>Guard</span></p>'
+    return (f'<img src="data:image/png;base64,{data}" alt="OfferGuard - Verify. Trust. Intern." '
+            'style="width:340px;max-width:100%;display:block;margin:0 0 6px">')
+
+
+st.set_page_config(page_title="OfferGuard",
+                   page_icon=str(APP_DIR / "icon.png") if (APP_DIR / "icon.png").exists() else "🛡️",
+                   layout="centered")
 st.markdown(CSS, unsafe_allow_html=True)
 
 # Streamlit forgets a box's value when the box is not drawn on the current page.
@@ -1776,7 +1801,7 @@ def page_cross():
 # THE PAGE: header, the two-page menu, then the chosen page
 # ============================================================
 head_left, head_right = st.columns([5, 1.4])
-head_left.markdown('<p class="og-title">🛡️ Offer<span>Guard</span></p>'
+head_left.markdown(logo_html(st.session_state.dark) +
                    '<p class="og-sub">Paste an internship or job offer. Get a risk score, the exact red flags, '
                    'and where to cross-check them.</p>', unsafe_allow_html=True)
 head_right.button("☀️ Light" if st.session_state.dark else "🌙 Dark", on_click=toggle_theme,
