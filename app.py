@@ -2119,9 +2119,6 @@ def page_check():
               help="Six examples, each showing one feature: short links, email checks, domain checks")
     t2.button("🔗 Short link", on_click=load_example, args=(3,), key="ex_short",
               help="Offers hiding the real website behind a shortened link")
-    if st.session_state.get("demo_note"):
-        st.markdown(f'<div class="og-card" style="border-left:6px solid #6c4cf1;padding:10px 14px">'
-                    f'<b>🎯 {html.escape(st.session_state.demo_note)}</b></div>', unsafe_allow_html=True)
 
     with st.container(border=True):
         st.text_area("Offer message", key="w_msg", height=170,
