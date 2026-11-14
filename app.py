@@ -2112,21 +2112,6 @@ def toggle_theme():
 # ============================================================
 # PAGE 1: CHECK AN OFFER
 # ============================================================
-def genuine_banner(level=None):
-    """A banner at the top of Cross-check that sends everyone to trusted internship sites."""
-    field = st.session_state.field
-    title = ("🌱 Skip this offer. Find genuine internships here instead" if level == "High"
-             else "🌱 Find genuine internships on trusted platforms")
-    st.markdown(f'<div class="og-card" style="border-left:6px solid #1fa971"><b>{title}</b>'
-                f'<div style="opacity:.8;margin-top:4px;font-size:.93rem">Opens the real sites, searching for '
-                f'<b>{html.escape(FIELDS[field])}</b>. Real listings never ask you to pay to get selected. '
-                'Change the field in the "Genuine internships" tab.</div></div>', unsafe_allow_html=True)
-    platforms, _ = genuine_links(field)
-    cols = st.columns(len(platforms))
-    for col, (label, url) in zip(cols, platforms):
-        col.link_button(label, url)
-
-
 def page_check():
     for k in STATE_KEYS:
         if "w_" + k not in st.session_state:
@@ -2270,8 +2255,6 @@ def page_cross():
     if not live:
         st.info("Live lookups are turned off, so domain and company details are not shown.")
         st.button("Turn on live lookups", on_click=enable_live, key="enable_live")
-
-    genuine_banner(level)
 
     def domain_block(host, compact=False):
         if live:
