@@ -204,8 +204,9 @@ def root_domain(domain):
 # ============================================================
 HTTP_HEADERS = {"User-Agent": "OfferGuard/1.0 (student scam checker)",
                 "Accept": "application/json"}
-HTTP_TIMEOUT = 6
+HTTP_TIMEOUT = (3, 5)   # (connect, read) seconds: fail fast instead of freezing the page
 CACHE_SECONDS = 3600
+HOST_DOWN_SECONDS = 60  # after a service cannot be reached, skip it for this long
 
 
 @st.cache_resource
@@ -214,9 +215,9 @@ def _lookup_cache():
     return {}
 
 
-def _cache_get(key):
+def _cache_get(key, ttl=CACHE_SECONDS):
     entry = _lookup_cache().get(key)
-    if entry and time.time() - entry[0] < CACHE_SECONDS:
+    if entry and time.time() - entry[0] < ttl:
         return entry[1]
     return None
 
@@ -226,7 +227,11 @@ def _cache_put(key, value):
 
 
 def _get_json(url, params=None, headers=None):
-    """GET a URL. Returns (json, "") on success or (None, short reason) on failure."""
+    """GET a URL. Returns (json, "") on success or (None, short reason) on failure.
+    If a service cannot be reached, it is skipped for a minute so the page never freezes."""
+    host = urlparse(url).netloc
+    if _cache_get("down:" + host, HOST_DOWN_SECONDS):
+        return None, "service not reachable"
     reason = "unknown error"
     for attempt in range(2):
         try:
@@ -237,10 +242,10 @@ def _get_json(url, params=None, headers=None):
             reason = f"HTTP {r.status_code}"
             if r.status_code not in (429, 500, 502, 503, 504):
                 break  # retrying will not help (for example 404)
-        except requests.exceptions.Timeout:
-            reason = "timed out"
-        except requests.exceptions.ConnectionError:
-            reason = "could not connect"
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            _cache_put("down:" + host, True)
+            reason = "timed out" if isinstance(e, requests.exceptions.Timeout) else "could not connect"
+            break  # do not wait again on a service that is not answering
         except ValueError:
             reason = "unreadable reply"
             break
