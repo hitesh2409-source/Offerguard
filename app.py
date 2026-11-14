@@ -667,6 +667,42 @@ def genuine_links(field):
     return platforms, official
 
 
+ACTIONS = {
+    "High": ("🛑", "Stop. Do not reply or pay yet.", [
+        "Do not pay any fee or deposit, even if it is called refundable.",
+        "Do not share Aadhaar, PAN, bank details, passwords or OTPs.",
+        "Do not click links or continue the chat until you have checked the company.",
+        "Check the company on its official website and LinkedIn page (see the Cross-check tab).",
+        "If you already paid or shared documents: call 1930 or report at cybercrime.gov.in, and inform your bank.",
+    ]),
+    "Medium": ("⚠️", "Pause before you reply.", [
+        "Check the company on its official website and LinkedIn page (see the Cross-check tab).",
+        "Confirm that the recruiter's email domain matches the company's website.",
+        "Ask for a written offer that clearly states the role, duration and pay.",
+        "Do not pay money or send ID documents until the company is verified.",
+        "Ask your college placement cell or a senior if you are unsure.",
+    ]),
+    "Low": ("✅", "Few warning signs, but still confirm.", [
+        "A low score does not prove an offer is genuine.",
+        "Confirm the company's website and that the recruiter's email domain matches it.",
+        "Real offers never ask you to pay to get selected.",
+        "Share ID documents only after you have verified the company and accepted a written offer.",
+    ]),
+}
+
+
+def action_html(level):
+    """The 'What to do now' card shown under the gauge."""
+    icon, title, steps = ACTIONS[level]
+    color = LEVEL_COLORS[level]
+    items = "".join(f"<li>{html.escape(step)}</li>" for step in steps)
+    return (
+        f'<div class="og-card" style="border-left:6px solid {color}">'
+        f'<div style="font-weight:800;font-size:1.05rem">{icon} What to do now: {html.escape(title)}</div>'
+        f'<ol style="margin:8px 0 0 1.1rem;padding:0;line-height:1.55">{items}</ol></div>'
+    )
+
+
 def report_text(level, score, matches, message):
     lines = ["OFFERGUARD REPORT", f"Risk: {level} ({score}/100)", ""]
     for m in matches:
@@ -768,6 +804,7 @@ if go:
 res = st.session_state.result
 if res:
     st.markdown(gauge_html(res["score"], res["level"]), unsafe_allow_html=True)
+    st.markdown(action_html(res["level"]), unsafe_allow_html=True)
 
     tab1, tab2, tab3, tab4 = st.tabs(["🔎 Why this score", "✍️ Your message",
                                       "🧭 Cross-check", "🌱 Genuine internships"])
