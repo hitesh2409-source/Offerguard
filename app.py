@@ -1,5 +1,7 @@
 import base64
+import difflib
 import html
+import ipaddress
 import random
 import re
 import time
@@ -457,6 +459,271 @@ def lookup_company_wiki(company):
             break
     _cache_put(key, match or False)
     return match, ""
+
+
+# ============================================================
+# OFFICIAL WEBSITE VERIFICATION
+# OfferGuard finds the company's official website by itself, then checks it:
+#   1) Wikidata (a public database) lists the official website of known organisations.
+#   2) If Wikidata has nothing, we try obvious addresses built from the name
+#      (company.com, company.in ...) and keep only those that really exist.
+# The site is then opened and checked (does it answer, is it secure, does the page mention
+# the company, how old is the domain, can it receive email) and compared with the
+# sender's email domain and the links in the message.
+# ============================================================
+PAGE_BYTES = 150_000
+MAX_HOPS = 4
+GUESS_TLDS = [".com", ".in", ".co.in", ".org", ".io"]
+
+
+def _site_host(url):
+    """https://www.Infosys.com/about -> infosys.com  ('' if it is not a usable address)."""
+    url = str(url).strip()
+    parsed = urlparse(url if "//" in url else "https://" + url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
+def is_lookalike(a, b):
+    """True if two different websites have names so close that one may be imitating the other."""
+    ra, rb = root_domain(a), root_domain(b)
+    if ra == rb:
+        return False
+    la, lb = ra.split(".")[0], rb.split(".")[0]
+    if la == lb:
+        return True  # same name, different ending (company.com vs company.co)
+    if min(len(la), len(lb)) >= 4 and (la in lb or lb in la):
+        return True  # company-hr.com imitating company.com
+    return difflib.SequenceMatcher(None, la, lb).ratio() >= 0.8
+
+
+def lookup_wikidata_site(company):
+    """Official website of the company according to Wikidata.
+    Returns (match_dict_or_None, reason). reason is '' when the lookup itself worked."""
+    name = company.strip()
+    words = _company_words(name)
+    if not words:
+        return None, "the name is too short to look up"
+    key = "wd:" + name.lower()
+    cached = _cache_get(key)
+    if cached is not None:  # False means: we looked and found nothing
+        return (cached or None), ""
+    api = "https://www.wikidata.org/w/api.php"
+    data, err = _get_json(api, params={"action": "wbsearchentities", "search": name,
+                                       "language": "en", "limit": 7, "format": "json"})
+    if data is None:
+        return None, err
+    hits = []
+    for hit in data.get("search", []) or []:
+        squashed = re.sub(r"[^a-z0-9]+", "", str(hit.get("label", "")).lower())
+        if hit.get("id") and all(w in squashed for w in words):
+            hits.append(hit)
+    match = None
+    if hits:
+        ids = "|".join(h["id"] for h in hits[:5])
+        ent, err = _get_json(api, params={"action": "wbgetentities", "ids": ids,
+                                          "props": "claims", "format": "json"})
+        if ent is None:
+            return None, err
+        for hit in hits[:5]:
+            claims = ((ent.get("entities") or {}).get(hit["id"], {}).get("claims") or {}).get("P856") or []
+            claims = sorted(claims, key=lambda c: c.get("rank") != "preferred")
+            for claim in claims:
+                value = ((claim.get("mainsnak") or {}).get("datavalue") or {}).get("value")
+                host = _site_host(value) if isinstance(value, str) else ""
+                if host and "." in host:
+                    match = {"label": str(hit.get("label", "")),
+                             "description": str(hit.get("description", "")),
+                             "url": value, "host": host,
+                             "entity": "https://www.wikidata.org/wiki/" + hit["id"]}
+                    break
+            if match:
+                break
+    _cache_put(key, match or False)
+    return match, ""
+
+
+def guess_company_sites(company):
+    """Addresses built from the name that really exist (a DNS check). Returns (hosts, reason)."""
+    words = _company_words(company)
+    if not words:
+        return [], "the name is too short to guess an address"
+    key = "guess:" + "".join(words)
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached, ""
+    slug = "".join(words)[:40]
+    found, failed = [], 0
+    for tld in GUESS_TLDS:
+        host = slug + tld
+        status, answers, _ = _dns_records(host, "A")
+        if status is None:
+            failed += 1
+        elif status == 0 and answers:
+            found.append(host)
+    if failed == len(GUESS_TLDS):
+        return [], "the DNS service could not be reached"
+    _cache_put(key, found)
+    return found, ""
+
+
+def _is_public_host(host):
+    """False for addresses that point inside a private network (never open those)."""
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_global
+    except ValueError:
+        pass
+    status, answers, _ = _dns_records(host, "A")
+    if status != 0 or not answers:
+        return False
+    for a in answers:
+        try:
+            if not ipaddress.ip_address(a).is_global:
+                return False
+        except ValueError:
+            continue  # a CNAME line, not an address
+    return True
+
+
+def probe_website(host, company):
+    """Open the site's home page and look at it. Returns (info_dict_or_None, reason).
+    Only the first part of the page is read, and nothing on it is run."""
+    key = "probe:" + host
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached, ""
+    reason = "could not connect"
+    for start in (host, "www." + host):
+        url = "https://" + start
+        try:
+            for _ in range(MAX_HOPS + 1):
+                target = urlparse(url).hostname or ""
+                if not _is_public_host(target):
+                    reason = "the address does not point to a public website"
+                    break
+                r = requests.get(url, timeout=HTTP_TIMEOUT, stream=True, allow_redirects=False,
+                                 headers={**HTTP_HEADERS, "Accept": "text/html"})
+                if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("Location"):
+                    nxt = requests.compat.urljoin(url, r.headers["Location"])
+                    r.close()
+                    if not nxt.lower().startswith("https://"):
+                        reason = "the site redirects to an unencrypted page"
+                        break
+                    url = nxt
+                    continue
+                body = b""
+                for chunk in r.iter_content(4096):
+                    body += chunk
+                    if len(body) >= PAGE_BYTES:
+                        break
+                status = r.status_code
+                r.close()
+                text = body.decode("utf-8", errors="ignore")
+                title_m = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+                title = html.unescape(re.sub(r"\s+", " ", title_m.group(1))).strip()[:140] if title_m else ""
+                plain = re.sub(r"[^a-z0-9]+", "", re.sub(r"<[^>]+>", " ", text).lower())
+                words = _company_words(company)
+                info = {"status": status, "final_host": _site_host(url), "title": title,
+                        "mentions_company": bool(words) and all(w in plain for w in words),
+                        "blocked": status in (401, 403, 429, 503)}
+                if status < 400 or info["blocked"]:
+                    _cache_put(key, info)
+                    return info, ""
+                reason = f"HTTP {status}"
+                break
+        except requests.exceptions.SSLError:
+            reason = "its security certificate is invalid"
+        except requests.exceptions.Timeout:
+            reason = "timed out"
+        except requests.exceptions.RequestException:
+            reason = "could not connect"
+    return None, reason
+
+
+def verify_company_site(company, sender_domain="", link_hosts=()):
+    """Find the official website, check it, and compare it with the sender and the links.
+    Returns a dictionary for the page to draw."""
+    result = {"source": None, "host": "", "wikidata": None, "profile": None, "profile_err": "",
+              "dns": None, "dns_err": "", "probe": None, "probe_err": "", "others": [],
+              "notes": [], "sender": None, "links": [], "verdict": None, "errors": []}
+    match, err = lookup_wikidata_site(company)
+    if err:
+        result["errors"].append(f"Wikidata: {err}")
+    if match:
+        result.update(source="wikidata", host=match["host"], wikidata=match)
+    else:
+        guesses, gerr = guess_company_sites(company)
+        if gerr:
+            result["errors"].append(gerr)
+        if guesses:
+            result.update(source="guess", host=guesses[0], others=guesses[1:])
+    host = result["host"]
+    if not host:
+        result["verdict"] = ("Could not find an official website for this name automatically. "
+                             "Treat the company as unverified until you can find one.", "warn")
+        return result
+
+    result["profile"], result["profile_err"] = lookup_domain_profile(root_domain(host))
+    result["dns"], result["dns_err"] = lookup_dns_profile(root_domain(host))
+    result["probe"], result["probe_err"] = probe_website(host, company)
+
+    official_root = root_domain(host)
+    sender_domain = (sender_domain or "").lower()
+    if not sender_domain:
+        result["sender"] = ("info", "There is no sender email to compare with the official website.")
+    elif sender_domain in FREE_EMAIL_DOMAINS:
+        result["sender"] = ("warn", f"The sender uses a personal email ({sender_domain}), not an "
+                                    f"address on {official_root}.")
+    elif root_domain(sender_domain) == official_root:
+        result["sender"] = ("ok", f"The sender's email domain ({sender_domain}) belongs to the "
+                                  "official website.")
+    elif is_lookalike(sender_domain, host):
+        result["sender"] = ("bad", f"The sender's domain ({sender_domain}) looks like the official "
+                                   f"website ({official_root}) but is a different website. "
+                                   "This is a common impersonation trick.")
+    else:
+        result["sender"] = ("warn", f"The sender's domain ({sender_domain}) is not the official "
+                                    f"website ({official_root}).")
+
+    for lh in link_hosts:
+        if root_domain(lh) == official_root:
+            result["links"].append(("ok", f"{lh} is on the official website."))
+        elif is_lookalike(lh, host):
+            result["links"].append(("bad", f"{lh} looks like the official website but is a "
+                                           "different one. Do not open it."))
+        elif not is_trusted_link(lh):
+            result["links"].append(("info", f"{lh} is not the official website."))
+
+    # ---- overall verdict
+    prof, dns, probe = result["profile"], result["dns"], result["probe"]
+    sender_kind = result["sender"][0]
+    link_bad = any(k == "bad" for k, _ in result["links"])
+    site_ok = bool(probe) and (probe["mentions_company"] or probe["blocked"] or result["source"] == "wikidata")
+    old = bool(prof) and prof["age"] >= 365
+    if sender_kind == "bad" or link_bad:
+        result["verdict"] = ("Warning: something in this offer imitates the official website. "
+                             "Do not reply or click until you are sure.", "bad")
+    elif dns and not dns["exists"]:
+        result["verdict"] = ("The official website's domain does not exist any more. "
+                             "Treat the offer with caution.", "bad")
+    elif result["source"] == "wikidata" and sender_kind == "ok":
+        result["verdict"] = ("Verified: a public database lists this website as the company's own, "
+                             "and the sender's email is on it. This is a good sign, but still "
+                             "never pay to get an offer.", "ok")
+    elif result["source"] == "wikidata":
+        result["verdict"] = ("The official website was found, but this offer does not clearly come "
+                             "from it. Contact the company through the website's own contact "
+                             "details to confirm the offer.", "warn")
+    elif sender_kind == "ok" and site_ok and old:
+        result["verdict"] = ("Probably genuine: a website matching the company name exists, is "
+                             "established, and the sender's email is on it. It was found by name, "
+                             "not confirmed by a public database.", "ok")
+    else:
+        result["verdict"] = ("A website with a similar name exists, but OfferGuard cannot confirm "
+                             "it belongs to this company. Check it yourself before trusting the offer.",
+                             "warn")
+    return result
 
 
 def check_domain(domain, group="Sender check", label=""):
@@ -1406,6 +1673,61 @@ def domain_card_html(domain, prof, prof_err, dns, dns_err, compact=False):
             f'<p class="og-verdict {verdict[1]}">{html.escape(verdict[0])}</p></div>')
 
 
+def official_site_html(r, company):
+    """The card that shows the result of verify_company_site. All text is escaped."""
+    host = r["host"]
+    chips, rows = [], []
+    if r["source"] == "wikidata":
+        chips.append(chip_html("Listed in Wikidata", "ok"))
+    else:
+        chips.append(chip_html("Found by name (not confirmed)", "warn"))
+    prof, dns, probe = r["profile"], r["dns"], r["probe"]
+    if prof:
+        age = prof["age"]
+        pretty = f"{age} days" if age < 365 else f"about {age // 365} year(s)"
+        chips.append(chip_html(f"Registered {pretty} ago", "bad" if age < 90 else "warn" if age < 365 else "ok"))
+        rows += [("Registered on", prof["registered"]), ("Registrar", prof["registrar"])]
+    else:
+        chips.append(chip_html("Registration details unavailable", "info"))
+    if dns:
+        if not dns["exists"]:
+            chips.append(chip_html("Domain does not exist", "bad"))
+        else:
+            chips.append(chip_html("Can receive email" if dns["mx"] else "No mail servers",
+                                   "ok" if dns["mx"] else "warn"))
+    if probe:
+        if probe["blocked"]:
+            chips.append(chip_html("Site is up (blocks automatic checks)", "info"))
+        else:
+            chips.append(chip_html("Website opens securely", "ok"))
+            chips.append(chip_html("Page mentions the company" if probe["mentions_company"]
+                                   else "Page does not mention the company name",
+                                   "ok" if probe["mentions_company"] else "warn"))
+        rows.append(("Page title", probe["title"]))
+        if probe["final_host"] and root_domain(probe["final_host"]) != root_domain(host):
+            rows.append(("Redirects to", probe["final_host"]))
+    else:
+        chips.append(chip_html("Website could not be opened", "warn"))
+        rows.append(("Website", f"Could not be opened ({r['probe_err']})"))
+    if r["wikidata"]:
+        rows.append(("Matched record", f"{r['wikidata']['label']} - {r['wikidata']['description']}"
+                     if r["wikidata"]["description"] else r["wikidata"]["label"]))
+    if r["others"]:
+        rows.append(("Other similar addresses that exist", ", ".join(r["others"])))
+    table = "".join(f"<tr><td>{html.escape(k)}</td><td>{html.escape(str(v))}</td></tr>"
+                    for k, v in rows if v)
+    comparisons = ""
+    for kind, text in ([r["sender"]] if r["sender"] else []) + r["links"]:
+        comparisons += f'<div style="margin-top:6px">{chip_html({"ok": "Match", "bad": "Lookalike", "warn": "Mismatch", "info": "Note"}[kind], kind)} {html.escape(text)}</div>'
+    verdict = r["verdict"]
+    return (f'<div class="og-card"><div style="opacity:.7;font-size:.85rem">Official website of '
+            f'{html.escape(company)}</div>'
+            f'<div style="font-weight:800;font-size:1.1rem;word-break:break-all">{html.escape(host)}</div>'
+            f'<div style="margin:6px 0 2px">{"".join(chips)}</div>'
+            f'<table class="og-kv">{table}</table>{comparisons}'
+            f'<p class="og-verdict {verdict[1]}">{html.escape(verdict[0])}</p></div>')
+
+
 # ============================================================
 # PART 3B: THE WEBSITE (two pages)
 #   Page 1 "Check an offer": paste a message, get the score and the reasons.
@@ -1653,6 +1975,12 @@ def page_cross():
             prof, perr, dns, derr = None, "live lookups are off", None, "live lookups are off"
         st.markdown(domain_card_html(host, prof, perr, dns, derr, compact), unsafe_allow_html=True)
 
+    hosts = []
+    for raw in extract_links(res["message"]):
+        host, _ = link_host(raw)
+        if host and "." in host and host not in hosts:
+            hosts.append(host)
+
     t_company, t_sender, t_help, t_genuine = st.tabs(
         ["🏢 Company", "🌐 Sender and links", "🚨 Report and get help", "🌱 Genuine internships"])
 
@@ -1695,16 +2023,33 @@ def page_cross():
                     st.info("No encyclopedia page was found for this name. Small and new companies often "
                             "have none, so this alone says nothing good or bad.")
 
-        st.markdown("**How to confirm a company is real**")
-        st.markdown(
-            "1. **Registration:** a registered Indian company has a 21-character CIN. Search its name "
-            "on the MCA portal and make sure the name matches the offer.\n"
-            "2. **Website:** the company should have its own website, and the recruiter's email domain "
-            "should be the same as the website's domain.\n"
-            "3. **LinkedIn:** the company page should have real employees, real posts and a history, "
-            "not just a handful of new accounts.\n"
-            "4. **Call back:** phone the number on the company's own website, not the one in the message.\n"
-            "5. **In writing:** ask for an offer letter that states the role, duration and pay.")
+        st.markdown("**Official website check**")
+        if not live:
+            st.info("Turn on live lookups to let OfferGuard find and verify the official website.")
+        else:
+            with st.spinner("Finding and checking the official website..."):
+                site = verify_company_site(company, domain or "",
+                                           [h for h in hosts if h not in URL_SHORTENERS])
+            if site["host"]:
+                st.markdown(official_site_html(site, company), unsafe_allow_html=True)
+                label = ("Open the official website" if site["source"] == "wikidata"
+                         else "Open this website (not confirmed)")
+                st.link_button(label, "https://" + site["host"])
+                if site["wikidata"]:
+                    st.caption("Check that the matched record above is the company you mean. "
+                               "Different companies can share a name.")
+                else:
+                    st.caption("This address was built from the company name and found to exist. "
+                               "A scammer can also register a name like this, so it is a lead, "
+                               "not proof.")
+            else:
+                st.markdown(f'<div class="og-card"><p class="og-verdict {site["verdict"][1]}">'
+                            f'{html.escape(site["verdict"][0])}</p></div>', unsafe_allow_html=True)
+            for e in site["errors"]:
+                st.caption(f"Some lookups failed ({e}). This is a connection problem, so try again in a moment.")
+        st.markdown("**Company registration**")
+        st.caption("Indian companies have a 21-character CIN. The government register needs a "
+                   "captcha, so OfferGuard cannot read it for you, but you can check the name there.")
         st.link_button("Open the MCA portal (official site)", "https://www.mca.gov.in")
         with st.expander("Want to search further? These open in a new tab"):
             for heading, links in crosscheck_links(company, domain):
@@ -1730,11 +2075,6 @@ def page_cross():
             domain_block(domain)
 
         st.markdown("**Links in the message**")
-        hosts = []
-        for raw in extract_links(res["message"]):
-            host, _ = link_host(raw)
-            if host and "." in host and host not in hosts:
-                hosts.append(host)
         if not hosts:
             st.info("The message has no links.")
         looked_up = 0
