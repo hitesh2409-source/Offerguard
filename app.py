@@ -1417,9 +1417,15 @@ APP_DIR = Path(__file__).resolve().parent
 
 
 @st.cache_resource
+def _read_logo(name):
+    """Read a logo file. If the file is missing this raises, and Streamlit does NOT remember
+    a failure, so the logo appears as soon as the file is added (no stuck 'missing' state)."""
+    return base64.b64encode((APP_DIR / name).read_bytes()).decode()
+
+
 def _logo_data(name):
     try:
-        return base64.b64encode((APP_DIR / name).read_bytes()).decode()
+        return _read_logo(name)
     except OSError:
         return ""
 
