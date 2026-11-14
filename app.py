@@ -899,53 +899,17 @@ a[data-testid^="stBaseLinkButton"] {width: 100%; justify-content: center; border
 # ============================================================
 DARK_CSS = """
 <style>
-:root {color-scheme: dark;}
-.stApp {background-color: #14111f !important; color: #ece8f7 !important;}
-[data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stHeader"] {
-  background-color: transparent !important;}
+/* The whole app is flipped with one filter (invert + hue-rotate). This keeps every box,
+   border and line consistent. The colours below are chosen BEFORE the flip, so the
+   result is a purple-black page. Things that must keep their own colours are flipped
+   back (the filter undoes itself when applied twice). */
+html, body {background-color: #14111f !important;}
+.stApp {filter: invert(1) hue-rotate(180deg); background-color: #eeebf9 !important;}
 [data-testid="stAppViewContainer"] {
-  background-image: radial-gradient(520px 320px at 92% 0, rgba(255,143,171,.10), transparent),
-                    radial-gradient(520px 360px at 0 8%, rgba(142,197,255,.10), transparent) !important;}
-.stApp :is(h1, h2, h3, h4, h5, h6, strong, b, th, td, li, label, [data-testid="stWidgetLabel"] p),
-.stApp [data-testid="stMarkdownContainer"] p:not([class]) {color: #ece8f7 !important;}
-[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] * {color: #b4adca !important;}
-.stApp a:not([data-testid^="stBaseLinkButton"]) {color: #b4a3ff;}
-.og-title span {color: #a28bff !important;}
-.og-card {background: rgba(255,255,255,.06) !important; box-shadow: 0 8px 26px rgba(0,0,0,.35) !important;
-  border-color: rgba(255,255,255,.14) !important;}
-.og-f {background: rgba(255,255,255,.06) !important;}
-.og-chip.ok {background: #1fa97133; color: #5be2b0;}
-.og-chip.warn {background: #f5a52433; color: #ffc766;}
-.og-chip.bad {background: #e03e5a33; color: #ff8fa3;}
-.og-chip.info {background: #6c4cf144; color: #c2b5ff;}
-.og-verdict.ok {color: #5be2b0;} .og-verdict.warn {color: #ffc766;}
-.og-verdict.bad {color: #ff8fa3;} .og-verdict.info {color: #c2b5ff;}
-.stApp :is([data-baseweb="input"], [data-baseweb="base-input"], [data-baseweb="textarea"],
-           [data-baseweb="select"] > div) {
-  background-color: #1f1b2e !important; border-color: rgba(255,255,255,.18) !important;}
-.stApp :is(input, textarea) {background-color: #1f1b2e !important; color: #ece8f7 !important;
-  -webkit-text-fill-color: #ece8f7 !important;}
-.stApp ::placeholder {color: #8c86a3 !important; -webkit-text-fill-color: #8c86a3 !important; opacity: 1;}
-button[data-baseweb="tab"] {color: #b4adca !important;}
-button[data-baseweb="tab"][aria-selected="true"] {color: #ffffff !important;}
-[data-baseweb="tab-border"] {background-color: rgba(255,255,255,.15) !important;}
-button[data-testid^="stBaseButton-secondary"], a[data-testid^="stBaseLinkButton"] {
-  background-color: #1f1b2e !important; color: #ece8f7 !important;
-  border: 1px solid rgba(255,255,255,.2) !important;}
-button[data-testid^="stBaseButton-secondary"]:hover, a[data-testid^="stBaseLinkButton"]:hover {
-  border-color: #a28bff !important; color: #ffffff !important;}
-[data-testid="stExpander"] {border-color: rgba(255,255,255,.15) !important;
-  background: rgba(255,255,255,.04) !important;}
-[data-testid="stExpander"] details, [data-testid="stExpander"] summary {
-  background: transparent !important; color: #ece8f7 !important;}
-[data-testid="stAlert"] {background-color: rgba(255,255,255,.07) !important;
-  border: 1px solid rgba(255,255,255,.14) !important;}
-[data-testid="stAlert"] * {color: #ece8f7 !important;}
-[data-testid="stAlert"]:has([data-testid="stAlertContentWarning"]) {border-left: 5px solid #f5a524 !important;}
-[data-testid="stAlert"]:has([data-testid="stAlertContentError"]) {border-left: 5px solid #e03e5a !important;}
-[data-testid="stAlert"]:has([data-testid="stAlertContentSuccess"]) {border-left: 5px solid #1fa971 !important;}
-[data-testid="stAlert"]:has([data-testid="stAlertContentInfo"]) {border-left: 5px solid #6c4cf1 !important;}
-code, pre {background-color: #1f1b2e !important; color: #ece8f7 !important;}
+  background-image: radial-gradient(520px 320px at 92% 0, #e3d6ff, transparent),
+                    radial-gradient(520px 360px at 0 8%, #cfd9fb, transparent) !important;}
+.stApp img, .stApp video, button[data-testid="stBaseButton-primary"] {
+  filter: invert(1) hue-rotate(180deg);}
 </style>
 """
 
