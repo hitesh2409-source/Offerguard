@@ -1158,6 +1158,72 @@ a[data-testid^="stBaseLinkButton"] {width: 100%; justify-content: center; border
 .og-verdict {margin: 10px 0 0; font-weight: 700; font-size: .93rem;}
 .og-verdict.ok {color: #13805a;} .og-verdict.warn {color: #a86300;}
 .og-verdict.bad {color: #b3213b;} .og-verdict.info {color: #4b32c4;}
+
+/* ---------- motion ---------- */
+@keyframes og-up {from {opacity: 0; transform: translateY(14px);} to {opacity: 1; transform: none;}}
+@keyframes og-pin {from {left: 0;}}
+@keyframes og-grow {from {width: 0;}}
+@keyframes og-pulse {0%,100% {box-shadow: 0 0 0 0 rgba(224,62,90,.45);} 50% {box-shadow: 0 0 0 9px rgba(224,62,90,0);}}
+@property --og-n {syntax: '<integer>'; initial-value: 0; inherits: false;}
+@keyframes og-count {from {--og-n: 0;}}
+.og-card, .og-f, .og-tile, .og-step {animation: og-up .5s ease-out both;}
+.og-card {transition: transform .2s ease, box-shadow .2s ease;}
+.og-card:hover {transform: translateY(-2px); box-shadow: 0 14px 34px rgba(108,76,241,.16);}
+.og-f {transition: transform .18s ease, background .18s ease;}
+.og-f:hover {transform: translateX(4px); background: rgba(108,76,241,.09);}
+.og-bar {animation: og-grow .9s ease-out both;}
+.og-num {font-size: 2.6rem; font-weight: 800; line-height: 1; --og-n: 0; animation: og-count 1.1s ease-out; counter-reset: ogn var(--og-n);}
+.og-num::before {content: counter(ogn);}
+.og-num small {font-size: 1rem; opacity: .55; font-weight: 700;}
+.og-badge.High {animation: og-pulse 1.8s ease-in-out infinite;}
+
+/* ---------- header and trust chips ---------- */
+.og-trust {margin: 0 0 10px;}
+
+/* ---------- navigation: two big step buttons ---------- */
+[class*="st-key-nav_"] button {border-radius: 16px !important; padding: .65rem 1rem !important; transition: transform .15s ease, box-shadow .15s ease;}
+[class*="st-key-nav_"] button:hover {transform: translateY(-2px); box-shadow: 0 8px 20px rgba(108,76,241,.2);}
+
+/* ---------- buttons and inputs ---------- */
+div.stButton > button, div.stDownloadButton > button, a[data-testid^="stBaseLinkButton"] {transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;}
+div.stButton > button:hover, div.stDownloadButton > button:hover, a[data-testid^="stBaseLinkButton"]:hover {transform: translateY(-2px); box-shadow: 0 8px 20px rgba(108,76,241,.2); border-color: #6c4cf1;}
+div.stButton > button:active {transform: scale(.97);}
+button[data-testid="stBaseButton-primary"] {background-image: linear-gradient(135deg, #6c4cf1, #8f6bff) !important;}
+[data-baseweb="textarea"], [data-baseweb="input"] {border-radius: 14px !important; transition: box-shadow .2s ease, border-color .2s ease;}
+[data-baseweb="textarea"]:focus-within, [data-baseweb="input"]:focus-within {box-shadow: 0 0 0 3px rgba(108,76,241,.25) !important; border-color: #6c4cf1 !important;}
+button[data-baseweb="tab"] {border-radius: 12px 12px 0 0; transition: background .15s ease;}
+button[data-baseweb="tab"]:hover {background: rgba(108,76,241,.09);}
+[data-testid="stExpander"] {border-radius: 16px; transition: box-shadow .2s ease;}
+[data-testid="stExpander"]:hover {box-shadow: 0 6px 18px rgba(108,76,241,.12);}
+
+/* ---------- risk meter ---------- */
+.og-meter {position: relative; display: flex; height: 12px; border-radius: 999px; overflow: visible; margin: 18px 6px 4px;}
+.og-meter > i {display: block; height: 100%;}
+.og-meter > i:first-child {border-radius: 999px 0 0 999px;} .og-meter > i:nth-child(3) {border-radius: 0 999px 999px 0;}
+.og-pin {position: absolute; top: -5px; width: 22px; height: 22px; margin-left: -11px; border-radius: 50%;
+  background: #fff; border: 4px solid var(--c); box-shadow: 0 2px 8px rgba(0,0,0,.25); animation: og-pin 1.1s ease-out;}
+.og-scale {display: flex; font-size: .72rem; opacity: .65; margin: 6px 6px 0;}
+.og-scale span:nth-child(1) {width: 20%;} .og-scale span:nth-child(2) {width: 30%;} .og-scale span:nth-child(3) {width: 50%;}
+
+/* ---------- summary tiles and group headers ---------- */
+.og-tiles {display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 6px 0 12px;}
+.og-tile {border: 1px solid rgba(128,128,128,.28); border-radius: 16px; padding: 10px 12px; background: rgba(255,255,255,.55);
+  transition: transform .2s ease, box-shadow .2s ease;}
+.og-tile:hover {transform: translateY(-3px); box-shadow: 0 10px 24px rgba(108,76,241,.15);}
+.og-tile b {display: block; font-size: 1.5rem; line-height: 1.1;}
+.og-tile span {font-size: .8rem; opacity: .75;}
+.og-gh {display: flex; justify-content: space-between; align-items: center; margin: 14px 0 2px; font-weight: 800;}
+
+/* ---------- how it works (shown before the first check) ---------- */
+.og-steps {display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 14px 0 6px;}
+.og-step {border: 1px dashed rgba(108,76,241,.45); border-radius: 18px; padding: 14px; text-align: center; background: rgba(108,76,241,.05);}
+.og-step:nth-child(2) {animation-delay: .1s;} .og-step:nth-child(3) {animation-delay: .2s;}
+.og-step .ic {font-size: 1.8rem;} .og-step b {display: block; margin: 4px 0 2px;} .og-step span {font-size: .85rem; opacity: .75;}
+.og-f:nth-child(2) {animation-delay: .05s;} .og-f:nth-child(3) {animation-delay: .1s;} .og-f:nth-child(4) {animation-delay: .15s;}
+.og-f:nth-child(5) {animation-delay: .2s;} .og-f:nth-child(n+6) {animation-delay: .25s;}
+
+@media (prefers-reduced-motion: reduce) {* {animation: none !important; transition: none !important;}}
+@media (max-width: 640px) {.og-title {font-size: 1.8rem !important;} .block-container, [data-testid="stMainBlockContainer"] {padding-top: 3.2rem !important;}}
 </style>
 """
 
@@ -1197,6 +1263,19 @@ button[data-testid^="stBaseButton-secondary"]:hover, a[data-testid^="stBaseLinkB
 """
 
 
+GROUP_ICONS = {"Warning signs": "🚩", "Missing details": "📋", "Sender check": "✉️", "Link check": "🔗"}
+LEVEL_ICONS = {"Low": "✅", "Medium": "⚠️", "High": "🛑"}
+
+
+def meter_html(score, color):
+    """A Low / Medium / High strip with a pin that slides to the score."""
+    pos = min(max(score, 0), 100)
+    return (f'<div class="og-meter" style="--c:{color}"><i style="width:20%;background:#1fa971"></i>'
+            f'<i style="width:30%;background:#f5a524"></i><i style="width:50%;background:#e03e5a"></i>'
+            f'<div class="og-pin" style="left:{pos}%"></div></div>'
+            '<div class="og-scale"><span>Low 0-19</span><span>Medium 20-49</span><span>High 50+</span></div>')
+
+
 def gauge_html(score, level):
     color = LEVEL_COLORS[level]
     offset = 141.4 * (1 - score / 100)
@@ -1207,11 +1286,44 @@ def gauge_html(score, level):
         'stroke-width="11" stroke-linecap="round"/>'
         f'<path d="M10 55 A45 45 0 0 1 100 55" fill="none" stroke="{color}" stroke-width="11" '
         f'stroke-linecap="round" stroke-dasharray="141.4" stroke-dashoffset="{offset:.1f}" '
-        'style="animation: og-fill 1s ease-out"/></svg>'
-        f'<div style="font-size:2.3rem;font-weight:800;line-height:1">{score}</div>'
-        f'<div class="og-badge" style="background:{color}22;color:{color}">{level} risk</div>'
-        f'<div style="opacity:.75;margin-top:8px">{SUMMARY[level]}</div></div>'
+        f'style="animation: og-fill 1s ease-out;filter:drop-shadow(0 0 4px {color}88)"/></svg>'
+        f'<div class="og-num" style="--og-n:{int(score)}" aria-label="Risk score {int(score)} out of 100"></div>'
+        f'<div style="opacity:.55;font-size:.8rem;margin:2px 0 8px">out of 100</div>'
+        f'<div class="og-badge {level}" style="background:{color}22;color:{color}">'
+        f'{LEVEL_ICONS[level]} {level} risk</div>'
+        f'<div style="opacity:.75;margin-top:8px">{SUMMARY[level]}</div>'
+        f'{meter_html(score, color)}</div>'
     )
+
+
+def tiles_html(matches):
+    """One small tile per group: how many findings and how many points they added."""
+    out = []
+    for group, icon in GROUP_ICONS.items():
+        items = [m for m in matches if m["group"] == group and m["points"] > 0]
+        pts = sum(m["points"] for m in items)
+        color = GROUP_COLORS[group]
+        out.append(f'<div class="og-tile" style="border-top:4px solid {color}"><b style="color:{color}">'
+                   f'{len(items)}</b><span>{icon} {html.escape(group)}'
+                   f'{f" · +{pts} pts" if pts else ""}</span></div>')
+    return '<div class="og-tiles">' + "".join(out) + "</div>"
+
+
+def group_header_html(group, items):
+    pts = sum(m["points"] for m in items)
+    color = GROUP_COLORS[group]
+    return (f'<div class="og-gh"><span>{GROUP_ICONS[group]} {html.escape(group)}</span>'
+            f'<span class="og-chip" style="background:{color}22;color:{color}">'
+            f'{len(items)} found · +{pts} pts</span></div>')
+
+
+def how_it_works_html():
+    steps = [("📋", "1. Paste", "Drop in the offer message or email, plus the sender and company if you know them."),
+             ("🔎", "2. Get a score", "See a 0-100 risk score and the exact red flags behind it."),
+             ("🧭", "3. Cross-check", "OfferGuard finds the official website and compares it with the sender and links.")]
+    return ('<div class="og-steps">' + "".join(
+        f'<div class="og-step"><div class="ic">{i}</div><b>{t}</b><span>{d}</span></div>'
+        for i, t, d in steps) + "</div>")
 
 
 def finding_html(m):
@@ -1875,6 +1987,7 @@ def page_check():
                 "score": score, "matches": matches, "level": level, "message": message,
                 "sender": st.session_state.sender, "company": st.session_state.company,
             }
+            st.toast(f"{level} risk · {score}/100", icon=LEVEL_ICONS[level])
             st.session_state.field = guess_field(message)
             history = [h for h in st.session_state.history if h["msg"] != message[:1500]]
             st.session_state.history = ([{"msg": message[:1500], "sender": st.session_state.sender,
@@ -1882,10 +1995,13 @@ def page_check():
                                           "level": level, "score": score}] + history)[:5]
 
     res = st.session_state.result
+    if not res:
+        st.markdown(how_it_works_html(), unsafe_allow_html=True)
     if res:
         st.markdown(gauge_html(res["score"], res["level"]), unsafe_allow_html=True)
         st.markdown(action_html(res["level"]), unsafe_allow_html=True)
 
+        st.markdown(tiles_html(res["matches"]), unsafe_allow_html=True)
         tab1, tab2 = st.tabs(["🔎 Why this score", "✍️ Your message"])
 
         with tab1:
@@ -1893,7 +2009,7 @@ def page_check():
                 for group in ["Warning signs", "Missing details", "Sender check", "Link check"]:
                     items = [m for m in res["matches"] if m["group"] == group]
                     if items:
-                        st.markdown(f"**{group}**")
+                        st.markdown(group_header_html(group, items), unsafe_allow_html=True)
                         st.markdown("".join(finding_html(m) for m in items), unsafe_allow_html=True)
             else:
                 st.write("No warning signs matched. That does not prove the offer is genuine.")
@@ -2149,15 +2265,18 @@ def page_cross():
 head_left, head_right = st.columns([5, 1.4])
 head_left.markdown(logo_html(st.session_state.dark) +
                    '<p class="og-sub">Paste an internship or job offer. Get a risk score, the exact red flags, '
-                   'and where to cross-check them.</p>', unsafe_allow_html=True)
+                   'and where to cross-check them.</p>'
+                   '<div class="og-trust"><span class="og-chip ok">🔒 Nothing saved</span>'
+                   '<span class="og-chip info">⚡ Live domain checks</span>'
+                   '<span class="og-chip warn">🎓 Built for students</span></div>', unsafe_allow_html=True)
 head_right.button("☀️ Light" if st.session_state.dark else "🌙 Dark", on_click=toggle_theme,
                   key="theme_btn", help="Switch between light and dark mode")
 
 page = st.session_state.page
 nav1, nav2 = st.columns(2)
-nav1.button("1 · Check an offer", on_click=goto, args=("check",), key="nav_check",
+nav1.button("📝 1 · Check an offer", on_click=goto, args=("check",), key="nav_check",
             type="primary" if page == "check" else "secondary")
-nav2.button("2 · Cross-check", on_click=goto, args=("cross",), key="nav_cross",
+nav2.button("🧭 2 · Cross-check", on_click=goto, args=("cross",), key="nav_cross",
             type="primary" if page == "cross" else "secondary")
 
 if page == "cross":
