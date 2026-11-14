@@ -1572,11 +1572,20 @@ def crosscheck_links(company, domain):
 
 def genuine_links(field):
     kw = FIELDS[field]
+    base = "-".join(w for w in re.findall(r"[a-z0-9]+", kw.lower()) if w not in ("intern", "internship"))
+    if base:
+        internshala = f"https://internshala.com/internships/keywords-{base}/"
+        unstop = "https://unstop.com/internships?searchTerm=" + quote_plus(base.replace("-", " "))
+        naukri = f"https://www.naukri.com/{base}-internship-jobs"
+    else:
+        internshala = "https://internshala.com/internships/"
+        unstop = "https://unstop.com/internships"
+        naukri = "https://www.naukri.com/internship-jobs"
     platforms = [
         ("LinkedIn", "https://www.linkedin.com/jobs/search/?keywords=" + quote_plus(kw)),
-        ("Internshala", google("site:internshala.com " + kw)),
-        ("Unstop", google("site:unstop.com " + kw)),
-        ("Naukri", google("site:naukri.com " + kw)),
+        ("Internshala", internshala),
+        ("Unstop", unstop),
+        ("Naukri", naukri),
     ]
     official = [
         ("PM Internship Scheme", "https://pminternship.mca.gov.in"),
@@ -2103,25 +2112,19 @@ def toggle_theme():
 # ============================================================
 # PAGE 1: CHECK AN OFFER
 # ============================================================
-def genuine_section(key, level=None):
-    """Sends everyone to trusted places to find real internships (LinkedIn, Internshala ...)."""
-    title = ("🌱 Skip this offer and apply on trusted platforms instead" if level == "High"
-             else "🌱 Looking for a real internship? Apply only through trusted platforms")
+def genuine_banner(level=None):
+    """A banner at the top of Cross-check that sends everyone to trusted internship sites."""
+    field = st.session_state.field
+    title = ("🌱 Skip this offer. Find genuine internships here instead" if level == "High"
+             else "🌱 Find genuine internships on trusted platforms")
     st.markdown(f'<div class="og-card" style="border-left:6px solid #1fa971"><b>{title}</b>'
-                '<div style="opacity:.8;margin-top:4px;font-size:.93rem">Genuine listings never ask you to pay '
-                'to get selected. Pick your field and open a trusted site.</div></div>', unsafe_allow_html=True)
-    if key not in st.session_state:
-        st.session_state[key] = st.session_state.field
-    field = st.radio("Field", list(FIELDS), key=key, horizontal=True, label_visibility="collapsed")
-    st.session_state.field = field
-    platforms, official = genuine_links(field)
+                f'<div style="opacity:.8;margin-top:4px;font-size:.93rem">Opens the real sites, searching for '
+                f'<b>{html.escape(FIELDS[field])}</b>. Real listings never ask you to pay to get selected. '
+                'Change the field in the "Genuine internships" tab.</div></div>', unsafe_allow_html=True)
+    platforms, _ = genuine_links(field)
     cols = st.columns(len(platforms))
     for col, (label, url) in zip(cols, platforms):
         col.link_button(label, url)
-    with st.expander("Government and college portals"):
-        cols = st.columns(2)
-        for i, (label, url) in enumerate(official):
-            cols[i % 2].link_button(label, url)
 
 
 def page_check():
@@ -2223,8 +2226,6 @@ def page_check():
         st.button("🧭 Continue to Cross-check  →", on_click=goto, args=("cross",),
                   key="to_cross", type="primary")
 
-    genuine_section("w_field_home", res["level"] if res else None)
-
     if st.session_state.history:
         with st.expander("Recent checks (this session)"):
             for i, h in enumerate(st.session_state.history):
@@ -2269,6 +2270,8 @@ def page_cross():
     if not live:
         st.info("Live lookups are turned off, so domain and company details are not shown.")
         st.button("Turn on live lookups", on_click=enable_live, key="enable_live")
+
+    genuine_banner(level)
 
     def domain_block(host, compact=False):
         if live:
