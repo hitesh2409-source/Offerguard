@@ -935,6 +935,254 @@ def report_text(level, score, matches, message):
     return "\n".join(lines)
 
 
+def _pdf_safe(text):
+    """The PDF's built-in fonts only know Western characters. Returns (safe_text, changed)."""
+    safe = text.encode("cp1252", "replace").decode("cp1252")
+    return safe, safe != text
+
+
+def _tint(hex_color, amount=0.88):
+    """Blend a colour with white (amount=1 would be pure white). Used for soft backgrounds."""
+    h = hex_color.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    mix = lambda c: round(c + (255 - c) * amount)
+    return "#%02x%02x%02x" % (mix(r), mix(g), mix(b))
+
+
+def report_pdf(level, score, matches, message, sender="", company=""):
+    """Build the PDF report and return it as bytes.
+    (reportlab is imported here so the rest of the app still works if it is missing.)"""
+    from io import BytesIO
+    from xml.sax.saxutils import escape
+    from reportlab.graphics.shapes import Drawing, Rect
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_RIGHT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (KeepTogether, Paragraph, SimpleDocTemplate,
+                                    Spacer, Table, TableStyle)
+
+    PURPLE = colors.HexColor("#6c4cf1")
+    INK = colors.HexColor("#2b2540")
+    MUTED = colors.HexColor("#6b6585")
+    level_hex = LEVEL_COLORS[level]
+    level_col = colors.HexColor(level_hex)
+    WIDTH = 174 * mm  # usable page width
+    changed = [False]  # becomes True if some characters could not be shown
+
+    def esc(text):
+        safe, was_changed = _pdf_safe(str(text))
+        changed[0] = changed[0] or was_changed
+        return escape(safe)
+
+    def style(name, **kw):
+        base = dict(fontName="Helvetica", fontSize=10, leading=14, textColor=INK)
+        base.update(kw)
+        return ParagraphStyle(name, **base)
+
+    body = style("body")
+    small = style("small", fontSize=8.5, leading=12, textColor=MUTED)
+    reason_style = style("reason", fontSize=9, leading=12.5)
+    right = style("right", fontName="Helvetica-Bold", alignment=TA_RIGHT)
+    heading = style("heading", fontName="Helvetica-Bold", fontSize=13, leading=17,
+                    spaceBefore=16, spaceAfter=6, textColor=PURPLE)
+    message_style = style("message", fontSize=9.5, leading=13.5, wordWrap="CJK")
+
+    def card(rows, color_hex, widths, spans=()):
+        """A soft coloured box with a thick coloured bar on its left side."""
+        t = Table(rows, colWidths=widths)
+        cmds = [("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_tint(color_hex, 0.9))),
+                ("LINEBEFORE", (0, 0), (0, -1), 4, colors.HexColor(color_hex)),
+                ("LEFTPADDING", (0, 0), (-1, -1), 10), ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ("VALIGN", (0, 0), (-1, -1), "TOP")]
+        cmds += [("SPAN", (0, r), (-1, r)) for r in spans]
+        t.setStyle(TableStyle(cmds))
+        return t
+
+    # ---------- Page decoration: purple header band, shield logo, footer ----------
+    stamp = datetime.now(timezone.utc).strftime("%d %b %Y, %H:%M UTC")
+
+    def draw_page(canvas, doc):
+        w, h = A4
+        canvas.saveState()
+        canvas.setFillColor(PURPLE)
+        canvas.rect(0, h - 24 * mm, w, 24 * mm, stroke=0, fill=1)
+        x, y = 18 * mm, h - 19 * mm  # shield logo
+        p = canvas.beginPath()
+        p.moveTo(x, y + 11 * mm)
+        p.lineTo(x + 4.5 * mm, y + 13 * mm)
+        p.lineTo(x + 9 * mm, y + 11 * mm)
+        p.lineTo(x + 9 * mm, y + 6 * mm)
+        p.curveTo(x + 9 * mm, y + 2.5 * mm, x + 6.5 * mm, y + 1 * mm, x + 4.5 * mm, y)
+        p.curveTo(x + 2.5 * mm, y + 1 * mm, x, y + 2.5 * mm, x, y + 6 * mm)
+        p.close()
+        canvas.setFillColor(colors.white)
+        canvas.drawPath(p, stroke=0, fill=1)
+        canvas.setStrokeColor(PURPLE)
+        canvas.setLineWidth(1.6)
+        canvas.lines([(x + 2.3 * mm, y + 6.3 * mm, x + 4 * mm, y + 4.5 * mm),
+                      (x + 4 * mm, y + 4.5 * mm, x + 6.9 * mm, y + 8.3 * mm)])
+        canvas.setFillColor(colors.white)
+        canvas.setFont("Helvetica-Bold", 20)
+        canvas.drawString(31 * mm, h - 14 * mm, "OfferGuard")
+        canvas.setFillColor(colors.HexColor("#ddd5ff"))
+        canvas.setFont("Helvetica", 9)
+        canvas.drawString(31 * mm, h - 19.5 * mm, "Internship and job offer risk report")
+        canvas.drawRightString(w - 18 * mm, h - 14 * mm, "Generated " + stamp)
+        canvas.setStrokeColor(colors.HexColor("#d9d3ee"))
+        canvas.setLineWidth(0.6)
+        canvas.line(18 * mm, 15 * mm, w - 18 * mm, 15 * mm)
+        canvas.setFillColor(MUTED)
+        canvas.setFont("Helvetica", 7.5)
+        canvas.drawString(18 * mm, 10.5 * mm,
+                          "OfferGuard shows warning signs, not a verdict. Always cross-check the company.")
+        canvas.drawRightString(w - 18 * mm, 10.5 * mm, f"Page {doc.page}")
+        canvas.restoreState()
+
+    story = []
+
+    # ---------- 1. Score summary ----------
+    score_cell = [Paragraph(f'<font size="38" color="{level_hex}"><b>{score}</b></font>'
+                            f'<font size="14" color="#6b6585"> / 100</font>',
+                            style("score", leading=44)),
+                  Paragraph("RISK SCORE", small)]
+    verdict_cell = [Paragraph(f'<font color="{level_hex}"><b>{level.upper()} RISK</b></font>',
+                              style("level", fontSize=19, leading=24)),
+                    Spacer(1, 3),
+                    Paragraph(esc(SUMMARY[level].replace("Use the cross-check links to confirm the company.",
+                                                         "Confirm the company before trusting it.")), body)]
+    hero = Table([[score_cell, verdict_cell]], colWidths=[55 * mm, WIDTH - 55 * mm])
+    hero.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_tint(level_hex, 0.88))),
+        ("LINEBEFORE", (0, 0), (0, -1), 6, level_col),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 16), ("RIGHTPADDING", (0, 0), (-1, -1), 14),
+        ("TOPPADDING", (0, 0), (-1, -1), 14), ("BOTTOMPADDING", (0, 0), (-1, -1), 14)]))
+    story.append(hero)
+    story.append(Spacer(1, 8))
+    bar = Drawing(WIDTH, 7)
+    bar.add(Rect(0, 0, WIDTH, 7, fillColor=colors.HexColor("#e6e1f5"), strokeColor=None))
+    bar.add(Rect(0, 0, WIDTH * score / 100, 7, fillColor=level_col, strokeColor=None))
+    story.append(bar)
+    story.append(Spacer(1, 3))
+    story.append(Paragraph("Low: 0 to 19  |  Medium: 20 to 49  |  High: 50 to 100", small))
+
+    # ---------- 2. What was checked ----------
+    details = []
+    if company.strip():
+        details.append(f"<b>Company:</b> {esc(company.strip())}")
+    if sender.strip():
+        details.append(f"<b>Sender email:</b> {esc(sender.strip())}")
+    if details:
+        story.append(Spacer(1, 8))
+        story.append(Paragraph("&nbsp;&nbsp;&nbsp;&nbsp;".join(details), body))
+
+    # ---------- 3. What to do now ----------
+    _, action_title, steps = ACTIONS[level]
+    story.append(Paragraph("What to do now", heading))
+    action_rows = [[Paragraph(f"<b>{esc(action_title)}</b>", body)]]
+    action_rows += [[Paragraph(esc(step.replace(" (see the Cross-check tab)", "")),
+                               reason_style, bulletText=f"{i}.")]
+                    for i, step in enumerate(steps, 1)]
+    story.append(card(action_rows, level_hex, [WIDTH]))
+
+    # ---------- 4. Why this score ----------
+    story.append(Paragraph("Why this score", heading))
+    if not matches:
+        story.append(Paragraph("No warning signs matched. That does not prove the offer is genuine.", body))
+    for group in ["Warning signs", "Missing details", "Sender check", "Link check"]:
+        items = [m for m in matches if m["group"] == group]
+        if not items:
+            continue
+        gcolor = GROUP_COLORS[group]
+        total = sum(m["points"] for m in items)
+        story.append(Paragraph(
+            f'<font color="{gcolor}"><b>{group}</b></font>'
+            f'<font color="#6b6585" size="9">  ({len(items)} found, +{total} points)</font>',
+            style("group", fontSize=11, leading=15, spaceBefore=6, spaceAfter=4)))
+        for m in items:
+            rows = [[Paragraph(f"<b>{esc(m['name'])}</b>", body),
+                     Paragraph(f"+{m['points']}", right)],
+                    [Paragraph(esc(m["reason"]), reason_style), ""]]
+            spans = [1]
+            if m["found"]:
+                rows.append([Paragraph("Found: " + esc(", ".join(m["found"])), small), ""])
+                spans.append(2)
+            story.append(KeepTogether([card(rows, gcolor, [WIDTH - 22 * mm, 22 * mm], spans),
+                                       Spacer(1, 5)]))
+
+    # ---------- 5. The message, with triggered phrases highlighted ----------
+    story.append(Paragraph("Message checked", heading))
+    shown = re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", message.strip())
+    cut = len(shown) > 3500
+    shown = _pdf_safe(shown[:3500])[0]
+    changed[0] = changed[0] or _pdf_safe(re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n",
+                                               message.strip())[:3500])[1]
+    words = [_pdf_safe(w)[0] for m in matches if m["group"] in ("Warning signs", "Link check")
+             for w in m["found"]]
+    spans_found = []
+    for w in sorted(set(words), key=len, reverse=True):
+        for hit in re.finditer(r"\b" + re.escape(w) + r"\b", shown, flags=re.IGNORECASE):
+            spans_found.append((hit.start(), hit.end()))
+    spans_found.sort()
+    merged = []
+    for s, e in spans_found:
+        if merged and s <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+    parts, pos = [], 0
+    for s, e in merged:
+        parts.append(escape(shown[pos:s]))
+        parts.append('<font backColor="#ffe58a">' + escape(shown[s:e]) + "</font>")
+        pos = e
+    parts.append(escape(shown[pos:]))
+    lines = "".join(parts).split("\n")  # a highlight never spans two lines
+    msg_box = Table([[Paragraph(line or "&nbsp;", message_style)] for line in lines],
+                    colWidths=[WIDTH], splitByRow=1)
+    msg_box.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f7f5fc")),
+        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#d9d3ee")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 12), ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+        ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, 0), 10), ("BOTTOMPADDING", (0, -1), (-1, -1), 10)]))
+    story.append(msg_box)
+    notes = ["Highlighted phrases triggered a warning sign."] if merged else []
+    if cut:
+        notes.append("The message was shortened for this report.")
+    if changed[0]:
+        notes.append("Emoji and non-English letters cannot be shown in this PDF and appear as ?.")
+    if notes:
+        story.append(Spacer(1, 3))
+        story.append(Paragraph(" ".join(notes), small))
+
+    # ---------- 6. Where to verify ----------
+    verify = [
+        "Search the company on its official website and LinkedIn page.",
+        "Make sure the recruiter's email domain matches the company's website.",
+        "Look for scam reports: search the company name with the words internship scam.",
+        "Already paid or shared documents? Call 1930 or report at cybercrime.gov.in.",
+        "Look for genuine internships at pminternship.mca.gov.in, internship.aicte-india.org "
+        "or ncs.gov.in.",
+    ]
+    story.append(KeepTogether([Paragraph("Where to verify", heading)]
+                              + [Paragraph(esc(v), reason_style, bulletText="\u2022") for v in verify]))
+    story.append(Spacer(1, 12))
+    story.append(Paragraph(
+        "<b>Important:</b> this report lists warning signs found by an automatic check. "
+        "It is not a verdict. A low score does not prove an offer is genuine, and a high "
+        "score does not prove it is fake. Always confirm with the company directly.", small))
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm,
+                            topMargin=32 * mm, bottomMargin=22 * mm,
+                            title="OfferGuard report", author="OfferGuard")
+    doc.build(story, onFirstPage=draw_page, onLaterPages=draw_page)
+    return buf.getvalue()
+
+
 # ============================================================
 # PART 3B: THE WEBSITE
 # ============================================================
@@ -1042,9 +1290,20 @@ if res:
                     st.markdown("".join(finding_html(m) for m in items), unsafe_allow_html=True)
         else:
             st.write("No warning signs matched. That does not prove the offer is genuine.")
-        st.download_button("⬇️ Download report",
-                           report_text(res["level"], res["score"], res["matches"], res["message"]),
-                           file_name="offerguard-report.txt")
+        try:
+            pdf_bytes = report_pdf(res["level"], res["score"], res["matches"], res["message"],
+                                   res["sender"], res["company"])
+        except Exception:
+            pdf_bytes = None
+        if pdf_bytes:
+            st.download_button("⬇️ Download PDF report", pdf_bytes,
+                               file_name="offerguard-report.pdf", mime="application/pdf")
+        else:
+            st.download_button("⬇️ Download report (text)",
+                               report_text(res["level"], res["score"], res["matches"], res["message"]),
+                               file_name="offerguard-report.txt")
+            st.caption("The PDF could not be made. Check that 'reportlab' is installed "
+                       "(it is listed in requirements.txt) and restart the app.")
 
     with tab2:
         words = [w for m in res["matches"] if m["group"] in ("Warning signs", "Link check") for w in m["found"]]
